@@ -28,7 +28,7 @@ def generate_consistency_report(
     roster_missing_from_cg = might_sing_this_cycle & not_in_cg
 
     cg_missing_from_both_monday_boards = join.cg == "right_only"
-    cg_missing_from_roster_but_did_audition = join.Email.isna() & (join.cg == "both")
+    cg_missing_from_roster_but_did_audition = (join.audition == "right_only") & (join.cg == "both")
     cg_missing_from_roster = cg_missing_from_both_monday_boards | cg_missing_from_roster_but_did_audition
 
     email_mismatch = format_mismatch_table(join, "Email", "primary_email")
