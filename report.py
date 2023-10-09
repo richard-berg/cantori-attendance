@@ -1,143 +1,506 @@
 from datetime import date
-from typing import Set, Tuple
+from typing import List, Set, Tuple
 
+import numpy as np
 import pandas
 
+MONDAY_YES = ["Yes", "Partial"]
+MONDAY_MAYBE = ["Maybe"]
 
-def generate_report(
-    attendance: pandas.DataFrame,
+
+def generate_consistency_report(
+    roster: pandas.DataFrame,
+    candidates: pandas.DataFrame,
+    cg_active: pandas.DataFrame,
+    season: str,
+    cycle_to: date,
+) -> Tuple[str, str]:
+    """Returns: subject (txt), body (HTML)"""
+    join = roster.merge(candidates, on="Name", how="outer", indicator="audition")
+    join = join.merge(cg_active, left_on="Name", right_on="whole_name", how="outer", indicator="cg")
+    join = _fill_and_sort(join)
+
+    accepted = (join.Group == season) & (join.RESULT == "Accepted")
+    candidates_missing_from_roster = accepted & (join.audition == "right_only")
+
+    not_in_cg = join.cg == "left_only"
+    might_sing_this_cycle = join[cycle_to].isin(MONDAY_YES + MONDAY_MAYBE)
+    roster_missing_from_cg = might_sing_this_cycle & not_in_cg
+
+    cg_missing_from_both_monday_boards = join.cg == "right_only"
+    cg_missing_from_roster_but_did_audition = join.Email.isna() & (join.cg == "both")
+    cg_missing_from_roster = cg_missing_from_both_monday_boards | cg_missing_from_roster_but_did_audition
+
+    email_mismatch = format_mismatch_table(join, "Email", "primary_email")
+    voice_mismatch = format_mismatch_table(join, "Voice Part", "voice_part")
+
+    tests = (
+        candidates_missing_from_roster.sum() > 0,
+        cg_missing_from_roster.sum() > 0,
+        roster_missing_from_cg.sum() > 0,
+        email_mismatch != "None",
+        voice_mismatch != "None",
+    )
+    if not any(tests):
+        return "", ""
+
+    subject = "ChoirGenius vs Monday.com consistency check failed!"
+    body = f"""
+    <section>
+    <h1>Monday.com Roster Issues</h1>
+    <p>These singers:</p>
+    <ul>
+        <li>Cannot receive chorus emails</li>
+        <li>Won't appear in Attendance reports, even if marked "present" in ChoirGenius</li>
+    </ul>
+
+    <h2>Audition status 'Accepted', but not in Roster</h2>
+    {format_singers_indented(join[candidates_missing_from_roster])}
+
+    <h2>ChoirGenius 'Active', but not in Roster</h2>
+    {format_singers_indented(join[cg_missing_from_roster])}
+    </section>
+
+    <br><hr>
+
+    <section>
+    <h1>ChoirGenius Issues</h1>
+    <p>These singers:</p>
+    <ul>
+        <li>Cannot be marked as Present at rehearsals</li>
+        <li>Cannot download music or view the calendar</li>
+    </ul>
+
+    <h2>On the {cycle_to.strftime(r'%B')} roster*, but not 'Active' in CG</h2>
+    {format_singers_indented(join[roster_missing_from_cg])}
+    <p style="font-size: 0.75rem">*including "Maybes"</p>
+    </section>
+
+    <br><hr>
+
+    <section>
+    <h1>Data Mismatches</h1>
+    <p>Depending which system is correct, these singers might:</p>
+    <ul>
+        <li>Want chorus emails sent to a different address</li>
+        <li>Be on the wrong section email list</li>
+        <li>Have everything functionally ok, but be confused by what they see in ChoirGenius</li>
+    </ul>
+
+    <h2>Email address mismatch</h2>
+    {email_mismatch}
+
+    <h2>Voice part mismatch</h2>
+    {voice_mismatch}
+    </section>
+    """
+
+    return subject, _wrap_body(body)
+
+
+def generate_projected_attendance_report(
+    projected_attendance: pandas.DataFrame,
+    roster: pandas.DataFrame,
+    today: date,
+    cycle_to: date,
+) -> Tuple[str, str]:
+    """Returns: subject (txt), body (HTML)"""
+
+    join = roster.merge(projected_attendance, on="Name", how="outer", indicator="projected")
+    join = _fill_and_sort(join)
+
+    next_rehearsal = min(c for c in projected_attendance.columns if isinstance(c, date) and c >= today)
+
+    singing_this_cycle = join[cycle_to].isin(MONDAY_YES)
+
+    confirmed = join[next_rehearsal] == 1
+    marked_absent = join[next_rehearsal] == 0
+    not_marked = join[next_rehearsal].isna()
+
+    subtotals = {
+        "Confirmed": confirmed,
+        "Marked Absent": marked_absent,
+        "Not Marked": not_marked,
+    }
+
+    body = f"""
+    <h1>Rehearsal Roster for {next_rehearsal}</h1>
+    {format_subtotals_table(join[singing_this_cycle], subtotals)}
+
+    <h1>Absence Details</h1>
+    {_projected_absence_details(join[singing_this_cycle], next_rehearsal)}
+    """
+
+    subject = f"Projected attendance for {next_rehearsal}"
+    return subject, _wrap_body(body)
+
+
+def generate_attendance_report(
+    actual_attendance: pandas.DataFrame,
+    projected_attendance: pandas.DataFrame,
     roster: pandas.DataFrame,
     cycle_to: date,
 ) -> Tuple[str, str]:
-    """Returns: subject, body"""
+    """Returns: subject (txt), body (HTML)"""
 
-    def format_singers_table(singers: Set[str]) -> str:
-        singers_enriched = enrich(singers, roster)
-        return name_voice_table(singers_enriched)
-
-    def format_subtotals_table(singers: Set[str]) -> str:
-        singers_enriched = enrich(singers, roster)
-        counts = singers_enriched.groupby(["Voice Part", "sort_key", "color", "border"]).count()
-        return name_voice_table(counts.reset_index().sort_values("sort_key"), email=False)
-
-    def format_singers_oneline(singers: Set[str]) -> str:
-        if not singers:
-            return "None"
-        else:
-            singers_enriched = enrich(singers, roster)
-            htmls = singers_enriched.apply(lambda row: format(row, "Name"), axis=1)
-            return ", ".join(htmls.to_list())
-
-    def format_singers_indented(singers: Set[str]) -> str:
-        line = format_singers_oneline(singers)
-        return f'<p style="margin-left: 20px">{line}</p>'
-
-    rehearsals = [c for c in attendance.columns if isinstance(c, date)]
     concerts = [c for c in roster.columns if isinstance(c, date)]
 
-    total_attended = attendance[rehearsals].sum(axis=1)
-    attended_at_least_one = set(attendance[total_attended > 0].Name)
-    attendance["Absences"] = len(rehearsals) - total_attended
+    past_rehearsals = [c for c in actual_attendance.columns if isinstance(c, date)]
+    first_rehearsal = min(past_rehearsals)
+    tonight = max(past_rehearsals)
 
-    yes = ["Yes", "Partial"]
-    maybe = ["Maybe"]
+    future_rehearsals = [c for c in projected_attendance.columns if isinstance(c, date) and c > tonight]
 
-    singing_this_cycle = set(roster[roster[cycle_to].isin(yes)].Name)
-    maybe_this_cycle = set(roster[roster[cycle_to].isin(maybe)].Name)
+    actual_attendance["Attended"] = actual_attendance[past_rehearsals].sum(axis=1)
+    actual_attendance["Absences"] = len(past_rehearsals) - actual_attendance["Attended"]
 
-    other_cycles = roster[concerts].drop(columns=cycle_to)
-    other_cycles_yes = set(roster[other_cycles.isin(yes).any(axis=1)].Name) - singing_this_cycle
-    other_cycles_maybe = (
-        set(roster[other_cycles.isin(maybe).any(axis=1)].Name) - singing_this_cycle - other_cycles_yes
+    join = roster.merge(projected_attendance, on="Name", how="outer", indicator="projected")
+    join = join.merge(
+        actual_attendance, on="Name", how="outer", indicator="actual", suffixes=("_projected", "_actual")
     )
-    gone = set(roster.Name) - singing_this_cycle - other_cycles_yes - other_cycles_maybe
+    join = _fill_and_sort(join)
 
-    active_emails = set(roster[roster["Chorus Emails"] == "Yes"].Name)
+    on_monday_roster = join.projected != "right_only"
 
-    relevant_absences = attendance[attendance.Name.isin(singing_this_cycle) & (attendance.Absences >= 1)]
-    absences_by_count = relevant_absences.groupby("Absences").agg({"Name": set}).sort_index(ascending=False)
-    absence_total_table = absences_by_count.Name.apply(format_singers_oneline)
-    absence_total_html = pandas.DataFrame(absence_total_table).to_html(
-        header=False, escape=False, index_names=False, border=0
+    singing_this_cycle = join[cycle_to].isin(MONDAY_YES)
+    maybe_this_cycle = join[cycle_to].isin(MONDAY_MAYBE)
+
+    attended_at_least_one = join.Attended > 0
+
+    other_cycles = join[concerts].drop(columns=cycle_to)
+    other_cycles_yes = other_cycles.isin(MONDAY_YES).any(axis=1) & ~singing_this_cycle
+    other_cycles_maybe = other_cycles.isin(MONDAY_MAYBE).any(axis=1) & ~(
+        singing_this_cycle | other_cycles_yes
     )
+    gone = on_monday_roster & ~(singing_this_cycle | other_cycles_yes | other_cycles_maybe)
 
-    first_rehearsal = min(rehearsals)
-    tonight = max(rehearsals)
-    attended_tonight = set(attendance[attendance[tonight] == 1].Name)
-    absent_tonight = singing_this_cycle - attended_tonight
+    active_emails = join["Chorus Emails"] == "Yes"
+
+    relevant_absences = singing_this_cycle & (join.Absences >= 1)
+
+    present_tonight = join[f"{tonight}_actual"] == 1
+    absent_tonight = singing_this_cycle & ~present_tonight
+
+    marked_absent = join[f"{tonight}_projected"] == 0
+    join["Excused"] = marked_absent.fillna(False).map(lambda x: "Marked in CG" if x else "Unexcused?")
+
+    if future_rehearsals:
+        next_rehearsal = min(future_rehearsals)
+        next_week = _projected_absence_details(join[singing_this_cycle], next_rehearsal)
+    else:
+        next_week = "<p>No more rehearsals this cycle!</p>"
+
+    subtotals = {
+        "Present": present_tonight,
+        "Absent": absent_tonight,
+    }
 
     body = f"""
-    <h1>Latest Rehearsal ({tonight})</h1>
+    <h1>This Week ({tonight})</h1>
+    {format_subtotals_table(join[singing_this_cycle], subtotals)}
 
-    <h2><b>{len(attended_tonight)}</b> present:</h2>
-    {format_subtotals_table(attended_tonight)}
+    <h2>Absence details:</h2>
+    {_table(join[absent_tonight], columns=["Name", "Excused", "Voice Part"])}
 
-    <h2><b>{len(absent_tonight)}</b> absent:</h2>
-    {format_singers_table(absent_tonight)}
+    <p>{_action_item("Please confirm whether they told us in advance, and follow up with anyone who is AWOL.")}</p>
 
-    <p><b><i>Please confirm whether they told us in advance, and follow up with anyone who is AWOL.</i></b></p>
+    <br><hr>
+
+    <h1>Next Rehearsal ({next_rehearsal})</h1>
+    {next_week}
+
+    <br><hr>
 
     <h1>This Cycle ({first_rehearsal} to {cycle_to})</h1>
 
-    <h2><b>{len(singing_this_cycle)}</b> singers on the concert roster:</h2>
-    {format_subtotals_table(singing_this_cycle)}
+    <h2><b>{singing_this_cycle.sum()}</b> singers have said they'll participate:</h2>
+    {format_subtotals_table(join[singing_this_cycle], {f"{cycle_to.strftime(r'%B')} Roster": singing_this_cycle})}
 
-    <h3>Total absences:</h3>
-    {absence_total_html}
+    <h2>Plus, <b>{maybe_this_cycle.sum()}</b> others are still listed as "maybe":</h2>
+    {format_singers_indented(join[maybe_this_cycle])}
+    <p>"Maybes" are not counted as part of the roster.
+    {_action_item('Please confirm their intentions, and move them to "Yes" or "No" ASAP.')}
+    </p>
+
+    <h2>Absences to date:</h2>
+    {format_absence_totals(join[relevant_absences])}
     <p>Singers with 3 or more absences are subject to make-up sessions, or being asked to sit out.</p>
 
-    <h2>Plus, <b>{len(maybe_this_cycle)}</b> others still listed as "maybe":</h2>
-    {format_singers_indented(maybe_this_cycle)}
-    <p>"Maybes" are not counted as part of the roster.  <b><i>Please confirm their intentions, and
-    move them to "Yes" or "No" ASAP.</i></b></p>
+    <br><hr>
 
     <h1>Looking Ahead</h1>
 
-    <h2><b>{len(other_cycles_yes | other_cycles_maybe)}</b> singers are sitting out:</h2>
+    <h2><b>{(other_cycles_yes | other_cycles_maybe).sum()}</b> singers are sitting out this cycle:</h2>
     <ul>
         <li>
-            <p><b>{len(other_cycles_yes)}</b> said they'd be back this season:</p>
-            {format_singers_indented(other_cycles_yes)}
+            <p><b>{other_cycles_yes.sum()}</b> said they'd be back later this season:</p>
+            {format_singers_indented(join[other_cycles_yes])}
         </li>
         <li>
-            <p><b>{len(other_cycles_maybe)}</b> said "maybe":</p>
-            {format_singers_indented(other_cycles_maybe)}
+            <p><b>{other_cycles_maybe.sum()}</b> said "maybe":</p>
+            {format_singers_indented(join[other_cycles_maybe])}
         </li>
     </ul>
 
-    <h2>The rest ({len(gone)}) are not expected back this season:</h2>
-    {format_singers_indented(gone)}
+    <h2>The rest ({gone.sum()}) are not expected back this season:</h2>
+    {format_singers_indented(join[gone])}
+
+    <br><hr>
 
     <h1>Consistency Checks</h1>
 
-    <p><b><i>Please double-check that these make sense</i></b> (i.e. aren't the result of inconsistent data entry
-    in ChoirGenius vs Monday.com)</p>
+    <p>{_action_item("Please double-check that these make sense")}
+    (i.e. aren't the result of inconsistent data entry in ChoirGenius vs Monday.com)</p>
 
     <ul>
 
     <li>
     <p>Currently getting chorus emails, yet aren't on the concert roster for this cycle:</p>
-    {format_singers_indented(active_emails - singing_this_cycle)}
+    {format_singers_indented(join[active_emails & ~singing_this_cycle])}
     </li>
 
     <li>
     <p>On the current concert roster, yet aren't getting emails:</p>
-    {format_singers_indented(singing_this_cycle - active_emails)}
+    {format_singers_indented(join[singing_this_cycle & ~active_emails])}
     </li>
 
     <li>
     <p>Have attended rehearsal(s) this cycle, yet aren't on the current concert roster:</p>
-    {format_singers_indented(attended_at_least_one - singing_this_cycle)}
+    {format_singers_indented(join[attended_at_least_one & ~singing_this_cycle])}
     </li>
 
     </ul>
+    """
 
-    <br/>
-    <br/>
-    <br/>
-    <br/>
+    subject = f"Attendance Report for {tonight}"
+    return subject, _wrap_body(body)
 
-    <div style="font-size: 12px">
+
+def _action_item(msg: str) -> str:
+    style = """
+        font-weight: bold;
+        font-style: italic;
+        background-color: #FDFD96;
+    """
+    return f'<span style="{style}">{msg}</span>'
+
+
+def _projected_absence_details(
+    df: pandas.DataFrame,
+    rehearsal_col: str | date,
+) -> str:
+    return f"""
+    <h2>Singers who are marked absent:</h2>
+    {format_singers_indented(df[df[rehearsal_col] == 0])}
+
+    <h2>Singers who haven't marked their plans in ChoirGenius:</h2>
+    {format_singers_indented(df[df[rehearsal_col].isna()])}
+    """
+
+
+def format_mismatch_table(singers: pandas.DataFrame, monday_col: str, choirgenius_col: str) -> str:
+    mismatch = (singers.cg == "both") & (singers[monday_col] != singers[choirgenius_col])
+
+    df = singers[mismatch]
+    if df.empty:
+        return "None"
+
+    df = df.rename(columns={monday_col: "Monday", choirgenius_col: "ChoirGenius"})
+    return _table(df, columns=["Name", "Monday", "ChoirGenius"], headers=True)
+
+
+def format_singers_oneline(singers: pandas.DataFrame) -> str:
+    if singers.empty:
+        return "None"
+
+    def link_email_and_highlight_section(row: pandas.Series):
+        style = f"""
+            display: inline-block;
+            text-decoration: none;
+            color: white;
+            background-color: {row["color"]};
+            border: 1px;
+            padding: 0.5rem 1rem;
+        """
+        return f'<a href="mailto:{row["Email"]}" style="{style}">{row["Name"]}</a>'
+
+    htmls = singers.apply(link_email_and_highlight_section, axis=1)
+    return "\n".join(htmls.to_list())
+
+
+def format_singers_indented(singers: pandas.DataFrame) -> str:
+    line = format_singers_oneline(singers)
+    return f'<p style="margin-left: 1.5rem">{line}</p>'
+
+
+def format_absence_totals(singers: pandas.DataFrame) -> str:
+    df = singers.groupby("Absences").agg({"Name": set})
+    df = df.sort_index(ascending=False).reset_index()
+
+    def format_name_aggregation(row: pandas.Series) -> str:
+        aggregated_names: Set[str] = row["Name"]
+        join = pandas.DataFrame(aggregated_names, columns=["Name"]).merge(singers, on="Name")
+        join = join.sort_values(["sort_key", "Name"])
+        return format_singers_oneline(join)
+
+    df = df.assign(Names_Formatted=df.apply(format_name_aggregation, axis=1))
+    return _table(df, columns=["Absences", "Names_Formatted"])
+
+
+def format_subtotals_table(df: pandas.DataFrame, indicators: dict[str, pandas.Series]) -> str:
+    """Indicators: a map from column name -> boolean Series."""
+    df = df.assign(**indicators)
+
+    indicator_col_names = list(indicators.keys())
+    groupby = ["Voice Part", "sort_key", "color"]
+    all_cols = groupby + indicator_col_names
+    display_cols = [c for c in all_cols if c not in ["sort_key", "color"]]
+
+    df = df[all_cols].groupby(groupby).sum().reset_index().sort_values("sort_key")
+    return _table(df, columns=display_cols, headers=True, totals=True)
+
+
+def _fill_and_sort(df: pandas.DataFrame) -> pandas.DataFrame:
+    """
+    Fill: df has been joined against ChoirGenius, which may not be 1:1, so we
+    want to fill in NAs where we can.
+
+    Sort: always by SATB, then by Name.
+    """
+    replacements = {
+        "color": df.color.fillna("black"),
+        "sort_key": df.sort_key.fillna(float("inf")),
+        "Email": df.Email.fillna("email-is-missing"),
+    }
+
+    if "whole_name" in df.columns:
+        # We've been joined against a ChoirGenius member query (not just an
+        # attendance query), so we have more data with which to fill in gaps
+        replacements.update(
+            {
+                "Name": df.Name.fillna(df.whole_name),
+                "Email": df.Email.fillna(df.EMAIL),
+                "Voice Part": df["Voice Part"].fillna(df.voice_part),
+            }
+        )
+
+    df = df.assign(**replacements)
+    df = df.sort_values(["sort_key", "Name"])
+    return df
+
+
+def _table(df: pandas.DataFrame, columns: List[str], headers: bool = False, totals: bool = False) -> str:
+    tbl_style = """
+        border-collapse: collapse;
+        border: 2px solid #eee;
+    """
+
+    col_map = {col: n for n, col in enumerate(df.columns)}
+
+    rows: List[str] = []
+    for i, row in enumerate(df.itertuples(index=False)):
+        row_bg = "white" if i % 2 == 0 else "#eee"
+        row_style = f"""
+            background-color: {row_bg};
+        """
+        cells = ""
+        for j, col in enumerate(columns):
+            weight = "bold" if j == 0 else "normal"
+
+            if col == "Name" and "Email" in col_map:
+                cell_value = f"""
+                <a href="mailto:{row[col_map["Email"]]}" style="text-decoration:none;">
+                    {row[col_map["Name"]]}
+                </a>
+                """
+            else:
+                cell_value = row[col_map[col]]
+
+            if col == "Voice Part" and "color" in col_map:
+                cell_style = f"""
+                    padding: 0.5rem 2rem;
+                    color: white;
+                    background-color: {row[col_map["color"]]};
+                    text-align: center;
+                    font-weight: {weight};
+                """
+            else:
+                align = "center" if isinstance(cell_value, (int, np.integer)) else "left"
+                cell_style = f"""
+                    padding: 0.5rem 1rem;
+                    color: black;
+                    text-align: {align};
+                    font-weight: {weight};
+                """
+
+            cells += f'\n<td style="{cell_style}">{cell_value}</td>'
+
+        rows.append(f'<tr style="{row_style}">{cells}</tr>')
+
+    if headers:
+        style = """
+            font-weight: bold;
+            font-size: 1.25rem;
+            text-align: center;
+            padding: 0.5rem 1rem;
+            background-color: rgba(12, 100, 192, 0.125);
+        """
+        skip_first_header = [""] + columns[1:]
+        head_cells = "\n".join(f'<th scope="col" style="{style}">{col}</th>' for col in skip_first_header)
+        head = f"<tr>{head_cells}</tr>"
+    else:
+        head = ""
+
+    if totals:
+        style = """
+            font-weight: bold;
+            font-size: 1.25rem;
+            text-align: center;
+            padding: 0.5rem 1rem;
+            background-color: rgba(12, 100, 192, 0.125);
+        """
+        sums = df[columns].sum(numeric_only=True)
+        total_cells = "\n".join(f'<td style="{style}">{int(s)}</td>' for s in sums)
+        footer = f'<tr><th scope="row" style="{style}"></th>{total_cells}</tr>'
+    else:
+        footer = ""
+
+    body = "\n".join(rows)
+    ret = f"""
+    <table style="{tbl_style}">
+        <thead>
+            {head}
+        </thead>
+        <tbody>
+            {body}
+        </tbody>
+        <tfoot>
+            {footer}
+        </tfoot>
+    </table>
+    """
+    return ret
+
+
+def _wrap_body(body: str) -> str:
+    return f"""
+    <body style="font-size: 100%; margin: 0px;">
+        <div style="width: 600px; padding: 1rem 1.5rem;">
+
+            {body}
+
+            <br><hr>
+
+            {_footer()}
+
+        </div>
+    </body>
+    """
+
+
+def _footer() -> str:
+    return """
+    <div style="font-size: 0.75rem">
         <p>
         This report was written by
         <a href="https://github.com/richard-berg/cantori-attendance">a bot</a>...
@@ -145,41 +508,11 @@ def generate_report(
         </p>
         <p>Data sources:</p>
         <ul>
+            <li><a href="https://cantori.choirgenius.com/accounts/manage">https://cantori.choirgenius.com/accounts/manage</a></li>
             <li><a href="https://cantori.choirgenius.com/report/attendance_grid_report">https://cantori.choirgenius.com/report/attendance_grid_report</a></li>
+            <li><a href="https://cantori.choirgenius.com/report/attendance_grid_forecast_report">https://cantori.choirgenius.com/report/attendance_grid_forecast_report</a></li>
             <li><a href="https://cantorinewyork.monday.com/boards/4609409564/views/112722504">https://cantorinewyork.monday.com/boards/4609409564/views/112722504</a></li>
+            <li><a href="https://cantorinewyork.monday.com/boards/3767283316/views/111015403">https://cantorinewyork.monday.com/boards/3767283316/views/111015403</a></li>
         </ul>
+    </div>
     """
-
-    subject = f"Attendance Report for {tonight}"
-    return subject, body
-
-
-def enrich(singers: Set[str], roster: pandas.DataFrame) -> pandas.DataFrame:
-    return roster[roster.Name.isin(singers)].sort_values(["sort_key", "Name"])
-
-
-def format(row: pandas.Series, column_name: str, email: bool = True) -> str:
-    text_style = "color: white; text-decoration: none;"
-    bg_color = f'background-color: {row["color"]};'
-    border = f'border-color: {row["border"]};'
-    text = row[column_name]
-    span = f'<span style="{text_style} {bg_color} {border}">{text}</span>'
-    if email:
-        return f'<a href="mailto:{row["Email"]}">{span}</a>'
-    else:
-        return span
-
-
-def name_voice_table(df: pandas.DataFrame, email: bool = True) -> str:
-    """Two-column HTML table of {Name, Voice Part w/ color coding}
-
-    Input have columns {Name, Voice Part, color, border}
-    """
-
-    def link_name_to_email(row: pandas.Series):
-        return f'<a href="mailto:{row["Email"]}">{row["Name"]}</a>'
-
-    name_html = df.apply(link_name_to_email, axis=1) if email else df.Name
-    voice_part_html = df.apply(lambda row: format(row, "Voice Part", email=False), axis=1)
-    table = df.assign(NameHtml=name_html, VoiceHtml=voice_part_html)[["NameHtml", "VoiceHtml"]]
-    return table.to_html(header=False, index=False, escape=False, border=0)

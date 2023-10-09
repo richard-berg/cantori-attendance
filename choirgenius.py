@@ -1,14 +1,23 @@
 from collections import defaultdict
 from datetime import date, datetime
+from enum import Enum
 from io import StringIO
 from types import TracebackType
 from typing import Optional, Type
 
 import httpx
+import json
 import pandas
 import yarl
 from bs4 import BeautifulSoup
 from typing_extensions import Self
+
+
+class EventType(Enum):
+    REHEARSAL = "49"
+
+
+DATE_FORMAT = r"%m-%d-%Y"
 
 
 class ChoirGenius:
@@ -43,29 +52,51 @@ class ChoirGenius:
     ) -> None:
         await self.client.__aexit__()
 
-    async def get_attendance(self, date_from: date, date_to: date) -> pandas.DataFrame:
-        report_url = str(self.base_url / "report/attendance_grid_report")
+    async def get_active(self) -> pandas.DataFrame:
+        ajax_url = str(self.base_url / "g4datatables_ajax_data_router")
+        data = {
+            "draw": "4",
+            "columns[0][data]": "formatted_name",
+            "columns[0][name]": "name",
+            "start": "0",
+            "length": "500",
+            "search[value]": 'status="active" AND role="member" AND label="Active"',
+            "search[regex]": "false",
+            "class": "AccountAccessTable",
+        }
+        response = await self.client.post(ajax_url, data=data)
+        js = json.loads(response.text)
+        df = pandas.DataFrame.from_records(js["data"], columns=["whole_name", "primary_email", "voice_part"])
+        return df
+
+    async def get_rehearsal_attendance(self, date_from: date, date_to: date) -> pandas.DataFrame:
+        response = await self._fetch_csv_report("attendance_grid_report", date_from, date_to)
+        df = self._parse_csv_export(response.text)
+        return df
+
+    async def get_projected_attendance(self, date_from: date, date_to: date) -> pandas.DataFrame:
+        response = await self._fetch_csv_report("attendance_grid_forecast_report", date_from, date_to)
+        df = self._parse_csv_export(response.text)
+        return df
+
+    async def _fetch_csv_report(self, report: str, date_from: date, date_to: date) -> httpx.Response:
+        report_url = str(self.base_url / "report" / report)
         html_report = await self.client.get(report_url)
 
-        soup = BeautifulSoup(html_report)
-        hidden_inputs = soup.select('#g4event-attendance-grid-report-filter input[type="hidden"]')
+        soup = BeautifulSoup(html_report, features="html.parser")
+        css_id = f'g4event-{report.replace("_", "-")}-filter'
+        hidden_inputs = soup.select(f'#{css_id} input[type="hidden"]')
         hidden_fields = {i.attrs["name"]: i.attrs["value"] for i in hidden_inputs}
 
-        date_format = r"%m-%d-%Y"
         data = {
             "sets[]": "g4account::role::member",
-            "event_type[]": "49",
-            "range_start[date]": date_from.strftime(date_format),
-            "range_end[date]": date_to.strftime(date_format),
+            "event_type[]": EventType.REHEARSAL.value,
+            "range_start[date]": date_from.strftime(DATE_FORMAT),
+            "range_end[date]": date_to.strftime(DATE_FORMAT),
             "export": "Export",
         }
         data.update(hidden_fields)
-        response = await self.client.post(report_url, data=data)
-        df = self._parse_csv_export(response.text)
-        df.columns = df.columns.map(
-            lambda col: datetime.strptime(col, r"%m-%d-%Y").date() if col[0].isdigit() else col
-        )
-        return df
+        return await self.client.post(report_url, data=data)
 
     def _parse_csv_export(self, csv: str):
         # first few rows from Drupal are crap -- formatted to look pretty in Excel, not
@@ -73,4 +104,7 @@ class ChoirGenius:
         valid_csv = "Name" + csv.split("\r", 2)[2]
         dtype = defaultdict(lambda: "Int32", Name="str")
         df = pandas.read_csv(StringIO(valid_csv), sep=",", lineterminator="\r", dtype=dtype)
+        df.columns = df.columns.map(
+            lambda col: datetime.strptime(col, DATE_FORMAT).date() if col[0].isdigit() else col
+        )
         return df
