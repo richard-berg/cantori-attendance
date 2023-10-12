@@ -36,6 +36,16 @@ class CantoriError(RuntimeError):
     pass
 
 
+@app.route(route="timezone")
+async def debug_time_zone(req: func.HttpRequest) -> func.HttpResponse:
+    msg = f"""
+    Current UTC time: {datetime.now(ZoneInfo("UTC"))}
+    Current NYC time: {datetime.now(ZoneInfo("America/New_York"))}
+    Current local time: {datetime.now()}
+    """
+    return func.HttpResponse(msg)
+
+
 # 10PM every Thursday, from September to May
 # time zone is determined by app setting WEBSITE_TIME_ZONE
 @app.schedule(schedule="0 0 22 * 9-12,1-5 Thursday", arg_name="myTimer")
