@@ -46,12 +46,14 @@ async def debug_time_zone(req: func.HttpRequest) -> func.HttpResponse:
     return func.HttpResponse(msg)
 
 
-# 10PM every Thursday, from September to May
-# time zone is determined by app setting WEBSITE_TIME_ZONE
-@app.schedule(schedule="0 0 22 * 9-12,1-5 Thursday", arg_name="myTimer")
+# 10PM every Thursday, Eastern Time, from September to May
+# Linux consumption apps don't support TZ, so 2AM Friday UTC is the best
+# approximation we've got.  Sometimes it'll be 10pm in NYC, sometimes 9pm.
+@app.schedule(schedule="0 0 2 * 9-12,1-5 Friday", arg_name="myTimer")
 async def thursday_night_trigger(myTimer: func.TimerRequest) -> None:
     if myTimer.past_due:
-        logging.info("The timer is past due!")
+        logging.info("The timer was past due!")
+        return
 
     try:
         roster = await get_roster()
@@ -78,11 +80,12 @@ async def thursday_night_trigger(myTimer: func.TimerRequest) -> None:
         await send_email("Error generating report", str(e), ERROR_EMAIL)
 
 
-# 2PM every Thursday, from September to May
-@app.schedule(schedule="0 0 14 * 9-12,1-5 Thursday", arg_name="myTimer")
+# 2PM Eastern every Thursday, from September to May
+@app.schedule(schedule="0 0 18 * 9-12,1-5 Thursday", arg_name="myTimer")
 async def thursday_afternoon_trigger(myTimer: func.TimerRequest) -> None:
     if myTimer.past_due:
-        logging.info("The timer is past due!")
+        logging.info("The timer was past due!")
+        return
 
     try:
         roster = await get_roster()
@@ -103,10 +106,11 @@ async def thursday_afternoon_trigger(myTimer: func.TimerRequest) -> None:
 
 
 # 10PM every night
-@app.schedule(schedule="0 0 22 * * *", arg_name="myTimer")
+@app.schedule(schedule="0 0 2 * * *", arg_name="myTimer")
 async def nightly_trigger(myTimer: func.TimerRequest) -> None:
     if myTimer.past_due:
-        logging.info("The timer is past due!")
+        logging.info("The timer was past due!")
+        return
 
     async def get_active():
         async with await _get_choirgenius() as cg:
