@@ -1,4 +1,5 @@
 import logging
+from typing import List
 from azure.identity.aio import DefaultAzureCredential
 from msgraph import GraphServiceClient
 from msgraph.generated.models.email_address import EmailAddress
@@ -11,13 +12,15 @@ from msgraph.generated.users.item.send_mail.send_mail_post_request_body import S
 MSGRAPH_SCOPES = ["https://graph.microsoft.com/.default"]
 
 
-async def send_email(subject: str, body: str, to_address: str):
+async def send_email(subject: str, body: str, to_addresses: List[str]):
     if not body:
         logging.info(f"Report '{subject}' is empty, skipping...")
         return
 
     async with DefaultAzureCredential() as credential:
         client = GraphServiceClient(credentials=credential, scopes=MSGRAPH_SCOPES)
+
+    to_recipients = [Recipient(email_address=EmailAddress(address=a)) for a in to_addresses]
 
     request_body = SendMailPostRequestBody(
         message=Message(
@@ -26,13 +29,7 @@ async def send_email(subject: str, body: str, to_address: str):
                 content_type=BodyType.Html,
                 content=body,
             ),
-            to_recipients=[
-                Recipient(
-                    email_address=EmailAddress(
-                        address=to_address,
-                    ),
-                ),
-            ],
+            to_recipients=to_recipients,
         ),
     )
 

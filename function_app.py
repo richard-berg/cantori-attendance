@@ -26,8 +26,8 @@ CHOIRGENIUS_SECRET_PASSWORD = "choirgenius-password"
 
 CANTORI_CHOIRGENIUS_COM = yarl.URL("https://cantori.choirgenius.com/")
 
-ATTENDANCE_EMAIL = "attendance@cantorinewyork.com"
-ERROR_EMAIL = "richard.berg@cantorinewyork.com"
+ATTENDANCE_EMAILS = ["attendance@cantorinewyork.com", "richard.berg@cantorinewyork.com"]
+ERROR_EMAILS = ["richard.berg@cantorinewyork.com"]
 
 app = func.FunctionApp()
 
@@ -75,9 +75,9 @@ async def thursday_night_trigger(myTimer: func.TimerRequest) -> None:
             )
 
         subject, body = generate_attendance_report(actual_attendance, projected_attendance, roster, cycle_to)
-        await send_email(subject, body, ATTENDANCE_EMAIL)
+        await send_email(subject, body, ATTENDANCE_EMAILS)
     except CantoriError as e:
-        await send_email("Error generating report", str(e), ERROR_EMAIL)
+        await send_email("Error generating report", str(e), ERROR_EMAILS)
 
 
 # 2PM Eastern every Thursday, from September to May
@@ -100,9 +100,9 @@ async def thursday_afternoon_trigger(myTimer: func.TimerRequest) -> None:
         subject, body = generate_projected_attendance_report(
             projected_attendance, roster, current_nyc_date, cycle_to
         )
-        await send_email(subject, body, ATTENDANCE_EMAIL)
+        await send_email(subject, body, ATTENDANCE_EMAILS)
     except CantoriError as e:
-        await send_email("Error generating report", str(e), ERROR_EMAIL)
+        await send_email("Error generating report", str(e), ERROR_EMAILS)
 
 
 # 10PM every night
@@ -125,9 +125,9 @@ async def nightly_trigger(myTimer: func.TimerRequest) -> None:
         _cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
 
         subject, body = generate_consistency_report(roster, candidates, cg_active, season, cycle_to)
-        await send_email(subject, body, ATTENDANCE_EMAIL)
+        await send_email(subject, body, ATTENDANCE_EMAILS)
     except CantoriError as e:
-        await send_email("Error generating report", str(e), ERROR_EMAIL)
+        await send_email("Error generating report", str(e), ERROR_EMAILS)
 
 
 def _determine_season(today: date) -> str:

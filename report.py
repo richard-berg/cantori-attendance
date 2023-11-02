@@ -178,7 +178,7 @@ def generate_attendance_report(
 
     relevant_absences = singing_this_cycle & (join.Absences >= 1)
 
-    present_tonight = join[f"{tonight}_actual"] == 1
+    present_tonight = (join[f"{tonight}_actual"] == 1).fillna(False)
     absent_tonight = singing_this_cycle & ~present_tonight
 
     marked_absent = join[f"{tonight}_projected"] == 0
