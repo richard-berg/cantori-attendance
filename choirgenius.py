@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import Enum
 from io import StringIO
 from types import TracebackType
@@ -88,11 +88,14 @@ class ChoirGenius:
         hidden_inputs = soup.select(f'#{css_id} input[type="hidden"]')
         hidden_fields = {i.attrs["name"]: i.attrs["value"] for i in hidden_inputs}
 
+        # CG seems to have switched to half-open date ranges
+        date_to_exclusive = date_to + timedelta(days=1)
+
         data = {
             "sets[]": "g4account::role::member",
             "event_type[]": EventType.REHEARSAL.value,
             "range_start[date]": date_from.strftime(DATE_FORMAT),
-            "range_end[date]": date_to.strftime(DATE_FORMAT),
+            "range_end[date]": date_to_exclusive.strftime(DATE_FORMAT),
             "export": "Export",
         }
         data.update(hidden_fields)
