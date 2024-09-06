@@ -1,6 +1,6 @@
 import json
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import httpx
@@ -8,24 +8,31 @@ import pandas
 
 API_URL = "https://api.monday.com/v2"
 API_VERSION = "2023-10"
-ROSTER_BOARD_ID = "4609409564"
+ROSTER_BOARD_ID = "6792979476"
 AUDITION_BOARD_ID = "3767283316"
 
 
-def _parse_roster_item(board_item: dict[str, Any], voice_part_metadata: dict[str, dict[str, str]]) -> dict:
-    ret = {"Name": board_item["name"]}
+def _parse_roster_item(
+    board_item: dict[str, Any], voice_part_metadata: dict[str, dict[str, str]]
+) -> dict[str | date, str]:
+    ret: dict[str | date, str] = {"Name": board_item["name"]}
     for column_value in board_item["column_values"]:
         field = column_value["column"]["title"]
         try:
-            second_date = field[field.index("-") : field.index(",")]
-            parse_me = field.replace(second_date, "")
+            if "-" in field:
+                second_date = field[field.index("-") : field.index(",")]
+                parse_me = field.replace(second_date, "")
+            else:
+                parse_me = field
+
+            # might raise
             cycle_end = datetime.strptime(parse_me, r"%b %d, %Y").date()
-            ret[cycle_end] = column_value["text"]  # type: ignore
+            ret[cycle_end] = column_value["text"]
         except ValueError:
             ret[field] = column_value["text"]
 
     voice_part = ret["Voice Part"]
-    ret.update(voice_part_metadata[voice_part])
+    ret.update(voice_part_metadata[voice_part])  # type: ignore
     return ret
 
 
