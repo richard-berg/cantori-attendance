@@ -1,4 +1,3 @@
-import logging
 from typing import List
 from azure.identity.aio import DefaultAzureCredential
 from msgraph import GraphServiceClient
@@ -13,10 +12,6 @@ MSGRAPH_SCOPES = ["https://graph.microsoft.com/.default"]
 
 
 async def send_email(subject: str, body: str, to_addresses: List[str]):
-    if not body:
-        logging.info(f"Report '{subject}' is empty, skipping...")
-        return
-
     async with DefaultAzureCredential() as credential:
         client = GraphServiceClient(credentials=credential, scopes=MSGRAPH_SCOPES)
 

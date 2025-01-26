@@ -50,15 +50,24 @@ async def debug_time_zone(req: func.HttpRequest) -> func.HttpResponse:
     return func.HttpResponse(msg)
 
 
-# 10PM every Thursday, Eastern Time, from September to May
+# 10PM daily, Eastern Time, from September to May
 # Linux consumption apps don't support TZ, so 2AM Friday UTC is the best
 # approximation we've got.  Sometimes it'll be 10pm in NYC, sometimes 9pm.
-@app.schedule(schedule="0 0 2 * 9-12,1-5 Friday", arg_name="myTimer")
-async def thursday_night_trigger(myTimer: func.TimerRequest) -> None:
+@app.schedule(schedule="0 0 2 * 9-12,1-5 *", arg_name="myTimer")
+async def trigger_attendance_report(myTimer: func.TimerRequest) -> None:
     if myTimer.past_due:
-        logging.info("The timer was past due!")
+        logging.warning("The timer was past due!")
         return
 
+    await send_attendance_report()
+
+
+@app.route(route="attendance_report", methods=[func.HttpMethod.POST])
+async def post_attendance_report(req: func.HttpRequest):
+    await send_attendance_report(force=True)
+
+
+async def send_attendance_report(force: bool = False):
     try:
         roster = await get_roster()
 
@@ -78,19 +87,31 @@ async def thursday_night_trigger(myTimer: func.TimerRequest) -> None:
                 cg.get_projected_attendance(cycle_from, cycle_to),
             )
 
-        subject, body = generate_attendance_report(actual_attendance, projected_attendance, roster, cycle_to)
-        await send_email(subject, body, ATTENDANCE_EMAILS)
+        subject, body, worth_sending = generate_attendance_report(
+            actual_attendance, projected_attendance, roster, current_nyc_date, cycle_to
+        )
+        if worth_sending or force:
+            await send_email(subject, body, ATTENDANCE_EMAILS)
     except CantoriError as e:
         await send_email("Error generating report", str(e), ERROR_EMAILS)
 
 
-# 2PM Eastern every Thursday, from September to May
-@app.schedule(schedule="0 0 18 * 9-12,1-5 Thursday", arg_name="myTimer")
-async def thursday_afternoon_trigger(myTimer: func.TimerRequest) -> None:
+# 2PM Eastern daily, from September to May
+@app.schedule(schedule="0 0 18 * 9-12,1-5 *", arg_name="myTimer")
+async def trigger_projected_attendance_report(myTimer: func.TimerRequest) -> None:
     if myTimer.past_due:
-        logging.info("The timer was past due!")
+        logging.warning("The timer was past due!")
         return
 
+    await send_projected_attendance_report()
+
+
+@app.route(route="projected_attendance_report", methods=[func.HttpMethod.POST])
+async def post_projected_attendance_report(req: func.HttpRequest):
+    await send_projected_attendance_report(force=True)
+
+
+async def send_projected_attendance_report(force: bool = False):
     try:
         roster = await get_roster()
 
@@ -101,36 +122,46 @@ async def thursday_afternoon_trigger(myTimer: func.TimerRequest) -> None:
         async with await _get_choirgenius() as cg:
             projected_attendance = await cg.get_projected_attendance(cycle_from, cycle_to)
 
-        subject, body = generate_projected_attendance_report(
+        subject, body, worth_sending = generate_projected_attendance_report(
             projected_attendance, roster, current_nyc_date, cycle_to
         )
-        await send_email(subject, body, ATTENDANCE_EMAILS)
+        if worth_sending or force:
+            await send_email(subject, body, ATTENDANCE_EMAILS)
     except CantoriError as e:
         await send_email("Error generating report", str(e), ERROR_EMAILS)
 
 
 # 10PM every night
 @app.schedule(schedule="0 0 2 * * *", arg_name="myTimer")
-async def nightly_trigger(myTimer: func.TimerRequest) -> None:
+async def trigger_consistency_report(myTimer: func.TimerRequest) -> None:
     if myTimer.past_due:
-        logging.info("The timer was past due!")
+        logging.warning("The timer was past due!")
         return
 
-    async def get_active():
-        async with await _get_choirgenius() as cg:
-            return await cg.get_active()
+    await send_consistency_report()
 
+
+@app.route(route="consistency_report", methods=[func.HttpMethod.POST])
+async def post_consistency_report(req: func.HttpRequest):
+    await send_consistency_report(force=True)
+
+
+async def send_consistency_report(force: bool = False):
     try:
-        roster, candidates, cg_active = await gather(get_roster(), get_audition_candidates(), get_active())
+        roster, candidates, cg_active = await gather(get_roster(), get_audition_candidates(), get_cg_active())
 
         current_nyc_time = datetime.now(ZoneInfo("America/New_York"))
         current_nyc_date = current_nyc_time.date()
         season = _determine_season(date.today())
         _cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
 
-        subject, body = generate_consistency_report(roster, candidates, cg_active, season, cycle_to)
+        subject, body, worth_sending = generate_consistency_report(
+            roster, candidates, cg_active, season, cycle_to
+        )
         subject += f" (as of {current_nyc_time.strftime('%Y-%m-%d %H:%M:%S %Z')})"
-        await send_email(subject, body, ATTENDANCE_EMAILS)
+
+        if worth_sending or force:
+            await send_email(subject, body, ATTENDANCE_EMAILS)
     except CantoriError as e:
         await send_email("Error generating report", str(e), ERROR_EMAILS)
 
@@ -168,6 +199,11 @@ async def get_audition_candidates() -> pandas.DataFrame:
     candidates = await get_monday_auditions(monday_api_key)
     logging.info(f"Got {len(candidates)} audition candidates from Monday.com")
     return candidates
+
+
+async def get_cg_active():
+    async with await _get_choirgenius() as cg:
+        return await cg.get_active()
 
 
 async def _get_monday_key() -> str:

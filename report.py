@@ -14,7 +14,7 @@ def generate_consistency_report(
     cg_active: pandas.DataFrame,
     season: str,
     cycle_to: date,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, bool]:
     """Returns: subject (txt), body (HTML)"""
     join = roster.merge(candidates, on="Name", how="outer", indicator="audition")
     join = join.merge(cg_active, left_on="Name", right_on="whole_name", how="outer", indicator="cg")
@@ -34,15 +34,15 @@ def generate_consistency_report(
     email_mismatch = format_mismatch_table(join, "Email", "primary_email")
     voice_mismatch = format_mismatch_table(join, "Voice Part", "voice_part")
 
-    tests = (
-        candidates_missing_from_roster.sum() > 0,
-        cg_missing_from_roster.sum() > 0,
-        roster_missing_from_cg.sum() > 0,
-        email_mismatch != "None",
-        voice_mismatch != "None",
+    worth_sending = any(
+        [
+            candidates_missing_from_roster.sum() > 0,
+            cg_missing_from_roster.sum() > 0,
+            roster_missing_from_cg.sum() > 0,
+            email_mismatch != "None",
+            voice_mismatch != "None",
+        ]
     )
-    if not any(tests):
-        return "", ""
 
     subject = "ChoirGenius vs Monday.com consistency check failed!"
     body = f"""
@@ -95,7 +95,7 @@ def generate_consistency_report(
     </section>
     """
 
-    return subject, _wrap_body(body)
+    return subject, _wrap_body(body), worth_sending
 
 
 def generate_projected_attendance_report(
@@ -103,13 +103,14 @@ def generate_projected_attendance_report(
     roster: pandas.DataFrame,
     today: date,
     cycle_to: date,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, bool]:
     """Returns: subject (txt), body (HTML)"""
 
     join = roster.merge(projected_attendance, on="Name", how="outer", indicator="projected")
     join = _fill_and_sort(join)
 
     next_rehearsal = min(c for c in projected_attendance.columns if isinstance(c, date) and c >= today)
+    worth_sending = next_rehearsal == today
 
     singing_this_cycle = join[cycle_to].isin(MONDAY_YES)
 
@@ -132,24 +133,28 @@ def generate_projected_attendance_report(
     """
 
     subject = f"Projected attendance for {next_rehearsal}"
-    return subject, _wrap_body(body)
+    return subject, _wrap_body(body), worth_sending
 
 
 def generate_attendance_report(
     actual_attendance: pandas.DataFrame,
     projected_attendance: pandas.DataFrame,
     roster: pandas.DataFrame,
+    current_nyc_date: date,
     cycle_to: date,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, bool]:
     """Returns: subject (txt), body (HTML)"""
 
     concerts = [c for c in roster.columns if isinstance(c, date)]
 
     past_rehearsals = [c for c in actual_attendance.columns if isinstance(c, date)]
     first_rehearsal = min(past_rehearsals)
-    tonight = max(past_rehearsals)
+    most_recent_rehearsal = max(past_rehearsals)
+    worth_sending = most_recent_rehearsal == current_nyc_date
 
-    future_rehearsals = [c for c in projected_attendance.columns if isinstance(c, date) and c > tonight]
+    future_rehearsals = [
+        c for c in projected_attendance.columns if isinstance(c, date) and c > most_recent_rehearsal
+    ]
 
     actual_attendance["Attended"] = actual_attendance[past_rehearsals].sum(axis=1)
     actual_attendance["Absences"] = len(past_rehearsals) - actual_attendance.Attended
@@ -183,10 +188,10 @@ def generate_attendance_report(
 
     relevant_absences = singing_this_cycle & (join.Absences_total >= 3)
 
-    present_tonight = (join[f"{tonight}_actual"] == 1).fillna(False)
+    present_tonight = (join[f"{most_recent_rehearsal}_actual"] == 1).fillna(False)
     absent_tonight = singing_this_cycle & ~present_tonight
 
-    marked_absent = join[f"{tonight}_projected"] == 0
+    marked_absent = join[f"{most_recent_rehearsal}_projected"] == 0
     join["Excused"] = marked_absent.fillna(False).map(lambda x: "Marked in CG" if x else "Unexcused?")
 
     if future_rehearsals:
@@ -201,7 +206,7 @@ def generate_attendance_report(
     }
 
     body = f"""
-    <h1>This Week ({tonight})</h1>
+    <h1>This Week ({most_recent_rehearsal})</h1>
     {format_subtotals_table(join[singing_this_cycle], subtotals)}
 
     <h2>Absence details:</h2>
@@ -225,7 +230,8 @@ def generate_attendance_report(
 
     <h2>Plus, <b>{maybe_this_cycle.sum()}</b> others are still listed as "maybe":</h2>
     {format_singers_indented(join[maybe_this_cycle])}
-    <p>"Maybes" are not counted as part of the roster.
+    <p>"Maybes" do not count toward the Roster stats above, nor to the Absence Totals below.</p>
+    <p>
     {_action_item('<b>Janara</b>: please confirm their intentions, and move them to "Yes" or "No" ASAP.')}
     </p>
 
@@ -284,8 +290,8 @@ def generate_attendance_report(
     </ul>
     """
 
-    subject = f"Attendance Report for {tonight}"
-    return subject, _wrap_body(body)
+    subject = f"Attendance Report for {most_recent_rehearsal}"
+    return subject, _wrap_body(body), worth_sending
 
 
 def _action_item(msg: str) -> str:
@@ -360,7 +366,7 @@ def format_absence_totals(singers: pandas.DataFrame) -> str:
         "Absences_total": "Total",
         "Absences_actual": "Actual",
         "Absences_projected": "Projected",
-        "Names_Formatted": "Names (clickable)",
+        "Names_Formatted": "Singers (click to email)",
     }
     df = df.rename(columns=col_names)
     return _table(df, columns=list(col_names.values()), headers=True)
