@@ -129,6 +129,7 @@ async def nightly_trigger(myTimer: func.TimerRequest) -> None:
         _cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
 
         subject, body = generate_consistency_report(roster, candidates, cg_active, season, cycle_to)
+        subject += f" (as of {current_nyc_time.strftime('%Y-%m-%d %H:%M:%S %Z')})"
         await send_email(subject, body, ATTENDANCE_EMAILS)
     except CantoriError as e:
         await send_email("Error generating report", str(e), ERROR_EMAILS)
