@@ -20,8 +20,8 @@ def _parse_roster_item(
         field = column_value["column"]["title"]
         try:
             if "-" in field:
-                second_date = field[field.index("-") : field.index(",")]
-                parse_me = field.replace(second_date, "")
+                first_date = field[field.index(" ") + 1 : field.index("-") + 1]
+                parse_me = field.replace(first_date, "")
             else:
                 parse_me = field
 
