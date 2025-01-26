@@ -152,13 +152,18 @@ def generate_attendance_report(
     future_rehearsals = [c for c in projected_attendance.columns if isinstance(c, date) and c > tonight]
 
     actual_attendance["Attended"] = actual_attendance[past_rehearsals].sum(axis=1)
-    actual_attendance["Absences"] = len(past_rehearsals) - actual_attendance["Attended"]
+    actual_attendance["Absences"] = len(past_rehearsals) - actual_attendance.Attended
+
+    # Only count explicitly marked absences, not dates that haven't been marked
+    projected_attendance["Absences"] = (projected_attendance[future_rehearsals] == 0).sum(axis=1)
 
     join = roster.merge(projected_attendance, on="Name", how="outer", indicator="projected")
     join = join.merge(
         actual_attendance, on="Name", how="outer", indicator="actual", suffixes=("_projected", "_actual")
     )
     join = _fill_and_sort(join)
+
+    join["Absences_total"] = join.Absences_actual + join.Absences_projected
 
     on_monday_roster = join.projected != "right_only"
 
@@ -176,7 +181,7 @@ def generate_attendance_report(
 
     active_emails = join["Chorus Emails"] == "Yes"
 
-    relevant_absences = singing_this_cycle & (join.Absences >= 1)
+    relevant_absences = singing_this_cycle & (join.Absences_total >= 3)
 
     present_tonight = (join[f"{tonight}_actual"] == 1).fillna(False)
     absent_tonight = singing_this_cycle & ~present_tonight
@@ -222,7 +227,7 @@ def generate_attendance_report(
     {_action_item('Please confirm their intentions, and move them to "Yes" or "No" ASAP.')}
     </p>
 
-    <h2>Absences to date:</h2>
+    <h2>Absence Totals:</h2>
     {format_absence_totals(join[relevant_absences])}
     <p>Singers with 3 or more absences are subject to make-up sessions, or being asked to sit out.</p>
 
@@ -334,7 +339,7 @@ def format_singers_indented(singers: pandas.DataFrame) -> str:
 
 
 def format_absence_totals(singers: pandas.DataFrame) -> str:
-    df = singers.groupby("Absences").agg({"Name": set})
+    df = singers.groupby(["Absences_total", "Absences_actual", "Absences_projected"]).agg({"Name": set})
     df = df.sort_index(ascending=False).reset_index()
 
     def format_name_aggregation(row: pandas.Series) -> str:
@@ -344,7 +349,14 @@ def format_absence_totals(singers: pandas.DataFrame) -> str:
         return format_singers_oneline(join)
 
     df = df.assign(Names_Formatted=df.apply(format_name_aggregation, axis=1))
-    return _table(df, columns=["Absences", "Names_Formatted"])
+    col_names = {
+        "Absences_total": "Total",
+        "Absences_actual": "Actual",
+        "Absences_projected": "Projected",
+        "Names_Formatted": "Names (clickable)",
+    }
+    df = df.rename(columns=col_names)
+    return _table(df, columns=list(col_names.values()), headers=True)
 
 
 def format_subtotals_table(df: pandas.DataFrame, indicators: dict[str, pandas.Series]) -> str:
