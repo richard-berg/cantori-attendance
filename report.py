@@ -1,30 +1,57 @@
 from datetime import date
+from enum import Enum
 from typing import List, Set, Tuple
 
 import numpy as np
 import pandas
 
-MONDAY_YES = ["Yes", "Partial"]
-MONDAY_MAYBE = ["Maybe"]
+
+class MondayConcertState(Enum):
+    YES = "Yes"
+    PARTIAL = "Partial"
+    MAYBE = "Maybe"
+    NO = "No"
+
+
+SINGING_STATES = [MondayConcertState.YES.value, MondayConcertState.PARTIAL.value]
+PARTIAL_STATES = [MondayConcertState.PARTIAL.value]
+MAYBE_STATES = [MondayConcertState.MAYBE.value]
+NO_STATES = [MondayConcertState.NO.value]
 
 
 def generate_consistency_report(
     roster: pandas.DataFrame,
     candidates: pandas.DataFrame,
     cg_active: pandas.DataFrame,
+    projected_concert_attendance: pandas.DataFrame,
     season: str,
     cycle_to: date,
 ) -> Tuple[str, str, bool]:
     """Returns: subject (txt), body (HTML)"""
     join = roster.merge(candidates, on="Name", how="outer", indicator="audition")
     join = join.merge(cg_active, left_on="Name", right_on="whole_name", how="outer", indicator="cg")
+
+    concerts = [c for c in projected_concert_attendance.columns if isinstance(c, date)]
+    projected_concert_attendance["Concerts_Marked_Absent"] = (
+        projected_concert_attendance[concerts] == 0
+    ).sum(axis=1)
+    projected_concert_attendance["Concerts_Marked_Singing"] = (
+        projected_concert_attendance[concerts] == 1
+    ).sum(axis=1)
+    join = join.merge(
+        projected_concert_attendance[["Name", "Concerts_Marked_Absent", "Concerts_Marked_Singing"]],
+        on="Name",
+        how="outer",
+        indicator="concert_attendance",
+    )
+
     join = _fill_and_sort(join)
 
     accepted = (join.Group == season) & (join.RESULT == "Accepted")
     candidates_missing_from_roster = accepted & (join.audition == "right_only")
 
     not_in_cg = join.cg == "left_only"
-    might_sing_this_cycle = join[cycle_to].isin(MONDAY_YES + MONDAY_MAYBE)
+    might_sing_this_cycle = join[cycle_to].isin(SINGING_STATES + MAYBE_STATES)
     roster_missing_from_cg = might_sing_this_cycle & not_in_cg
 
     cg_missing_from_both_monday_boards = join.cg == "right_only"
@@ -34,6 +61,17 @@ def generate_consistency_report(
     email_mismatch = format_mismatch_table(join, "Email", "primary_email")
     voice_mismatch = format_mismatch_table(join, "Voice Part", "voice_part")
 
+    marked_no = join.Concerts_Marked_Absent == len(concerts)
+    marked_partial = (join.Concerts_Marked_Absent > 0) & ~marked_no
+    marked_yes = join.Concerts_Marked_Singing == len(concerts)
+    marked_something = (join.Concerts_Marked_Absent + join.Concerts_Marked_Singing) > 0
+    marked_no_but_might_sing = marked_no & might_sing_this_cycle
+    marked_partial_but_not_partial = marked_partial & ~join[cycle_to].isin(PARTIAL_STATES)
+    partial_roster_but_marked_nonpartial = (
+        join[cycle_to].isin(PARTIAL_STATES) & ~marked_partial & marked_something
+    )
+    marked_yes_but_not_singing = marked_yes & join[cycle_to].isin(NO_STATES + MAYBE_STATES)
+
     worth_sending = any(
         [
             candidates_missing_from_roster.sum() > 0,
@@ -41,6 +79,10 @@ def generate_consistency_report(
             roster_missing_from_cg.sum() > 0,
             email_mismatch != "None",
             voice_mismatch != "None",
+            marked_no_but_might_sing.sum() > 0,
+            marked_partial_but_not_partial.sum() > 0,
+            marked_yes_but_not_singing.sum() > 0,
+            partial_roster_but_marked_nonpartial.sum() > 0,
         ]
     )
 
@@ -73,6 +115,28 @@ def generate_consistency_report(
 
     <h2>On the {cycle_to.strftime(r'%B')} roster*, but not 'Active' in CG</h2>
     {format_singers_indented(join[roster_missing_from_cg])}
+    <p style="font-size: 0.75rem">*including "Maybes"</p>
+    </section>
+
+    <br><hr>
+
+    <section>
+    <h1>Concert Attendance Issues</h1>
+    <p>These singers have explicitly marked themselves as Present/Absent for concert events in ChoirGenius,
+    in a way that doesn't line up with our Monday roster.</p>
+
+    <h2>Marked themself 'Absent' for all {cycle_to.strftime(r'%B')} concerts, but appear on the roster*</h2>
+    {format_singers_indented(join[marked_no_but_might_sing])}
+
+    <h2>Marked themself 'Absent' for <i>some</i> {cycle_to.strftime(r'%B')} concerts, but roster status is not 'Partial'</h2>
+    {format_singers_indented(join[marked_partial_but_not_partial])}
+
+    <h2>Marked themself 'Present' for all {cycle_to.strftime(r'%B')} concerts, but roster status is not 'Yes'</h2>
+    {format_singers_indented(join[marked_yes_but_not_singing])}
+
+    <h2>Roster status is 'Partial', but marked something else for {cycle_to.strftime(r'%B')} concerts</h2>
+    {format_singers_indented(join[partial_roster_but_marked_nonpartial])}
+
     <p style="font-size: 0.75rem">*including "Maybes"</p>
     </section>
 
@@ -112,7 +176,7 @@ def generate_projected_attendance_report(
     next_rehearsal = min(c for c in projected_attendance.columns if isinstance(c, date) and c >= today)
     worth_sending = next_rehearsal == today
 
-    singing_this_cycle = join[cycle_to].isin(MONDAY_YES)
+    singing_this_cycle = join[cycle_to].isin(SINGING_STATES)
 
     confirmed = join[next_rehearsal] == 1
     marked_absent = join[next_rehearsal] == 0
@@ -172,14 +236,14 @@ def generate_attendance_report(
 
     on_monday_roster = join.projected != "right_only"
 
-    singing_this_cycle = join[cycle_to].isin(MONDAY_YES)
-    maybe_this_cycle = join[cycle_to].isin(MONDAY_MAYBE)
+    singing_this_cycle = join[cycle_to].isin(SINGING_STATES)
+    maybe_this_cycle = join[cycle_to].isin(MAYBE_STATES)
 
     attended_at_least_one = join.Attended > 0
 
     other_cycles = join[concerts].drop(columns=cycle_to)
-    other_cycles_yes = other_cycles.isin(MONDAY_YES).any(axis=1) & ~singing_this_cycle
-    other_cycles_maybe = other_cycles.isin(MONDAY_MAYBE).any(axis=1) & ~(
+    other_cycles_yes = other_cycles.isin(SINGING_STATES).any(axis=1) & ~singing_this_cycle
+    other_cycles_maybe = other_cycles.isin(MAYBE_STATES).any(axis=1) & ~(
         singing_this_cycle | other_cycles_yes
     )
     gone = on_monday_roster & ~(singing_this_cycle | other_cycles_yes | other_cycles_maybe)

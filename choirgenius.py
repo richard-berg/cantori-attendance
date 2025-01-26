@@ -15,6 +15,7 @@ from typing_extensions import Self
 
 class EventType(Enum):
     REHEARSAL = "49"
+    CONCERT = "50"
 
 
 DATE_FORMAT = r"%m-%d-%Y"
@@ -70,16 +71,24 @@ class ChoirGenius:
         return df
 
     async def get_rehearsal_attendance(self, date_from: date, date_to: date) -> pandas.DataFrame:
-        response = await self._fetch_csv_report("attendance_grid_report", date_from, date_to)
+        response = await self._fetch_csv_report(
+            "attendance_grid_report", date_from, date_to, EventType.REHEARSAL
+        )
         df = self._parse_csv_export(response.text)
         return df
 
-    async def get_projected_attendance(self, date_from: date, date_to: date) -> pandas.DataFrame:
-        response = await self._fetch_csv_report("attendance_grid_forecast_report", date_from, date_to)
+    async def get_projected_attendance(
+        self, date_from: date, date_to: date, event_type: EventType
+    ) -> pandas.DataFrame:
+        response = await self._fetch_csv_report(
+            "attendance_grid_forecast_report", date_from, date_to, event_type
+        )
         df = self._parse_csv_export(response.text)
         return df
 
-    async def _fetch_csv_report(self, report: str, date_from: date, date_to: date) -> httpx.Response:
+    async def _fetch_csv_report(
+        self, report: str, date_from: date, date_to: date, event_type: EventType
+    ) -> httpx.Response:
         report_url = str(self.base_url / "report" / report)
         html_report = await self.client.get(report_url)
 
@@ -93,7 +102,7 @@ class ChoirGenius:
 
         data = {
             "sets[]": "g4account::role::member",
-            "event_type[]": EventType.REHEARSAL.value,
+            "event_type[]": event_type.value,
             "range_start[date]": date_from.strftime(DATE_FORMAT),
             "range_end[date]": date_to_exclusive.strftime(DATE_FORMAT),
             "export": "Export",

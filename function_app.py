@@ -10,7 +10,7 @@ import yarl
 from azure.identity.aio import DefaultAzureCredential
 from azure.keyvault.secrets.aio import SecretClient
 
-from choirgenius import ChoirGenius
+from choirgenius import ChoirGenius, EventType
 from graph_email import send_email
 from monday import get_monday_auditions, get_monday_roster
 from report import (
@@ -84,7 +84,7 @@ async def send_attendance_report(force: bool = False):
         async with await _get_choirgenius() as cg:
             actual_attendance, projected_attendance = await gather(
                 cg.get_rehearsal_attendance(cycle_from, rehearsals_to),
-                cg.get_projected_attendance(cycle_from, cycle_to),
+                cg.get_projected_attendance(cycle_from, cycle_to, EventType.REHEARSAL),
             )
 
         subject, body, worth_sending = generate_attendance_report(
@@ -120,7 +120,9 @@ async def send_projected_attendance_report(force: bool = False):
         cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
 
         async with await _get_choirgenius() as cg:
-            projected_attendance = await cg.get_projected_attendance(cycle_from, cycle_to)
+            projected_attendance = await cg.get_projected_attendance(
+                cycle_from, cycle_to, EventType.REHEARSAL
+            )
 
         subject, body, worth_sending = generate_projected_attendance_report(
             projected_attendance, roster, current_nyc_date, cycle_to
@@ -148,15 +150,21 @@ async def post_consistency_report(req: func.HttpRequest):
 
 async def send_consistency_report(force: bool = False):
     try:
-        roster, candidates, cg_active = await gather(get_roster(), get_audition_candidates(), get_cg_active())
-
         current_nyc_time = datetime.now(ZoneInfo("America/New_York"))
         current_nyc_date = current_nyc_time.date()
         season = _determine_season(date.today())
-        _cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
+
+        async with await _get_choirgenius() as cg:
+            roster, candidates, cg_active = await gather(
+                get_roster(), get_audition_candidates(), cg.get_active()
+            )
+            cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
+            projected_concert_attendance = await cg.get_projected_attendance(
+                cycle_from, cycle_to, EventType.CONCERT
+            )
 
         subject, body, worth_sending = generate_consistency_report(
-            roster, candidates, cg_active, season, cycle_to
+            roster, candidates, cg_active, projected_concert_attendance, season, cycle_to
         )
         subject += f" (as of {current_nyc_time.strftime('%Y-%m-%d %H:%M:%S %Z')})"
 
@@ -199,11 +207,6 @@ async def get_audition_candidates() -> pandas.DataFrame:
     candidates = await get_monday_auditions(monday_api_key)
     logging.info(f"Got {len(candidates)} audition candidates from Monday.com")
     return candidates
-
-
-async def get_cg_active():
-    async with await _get_choirgenius() as cg:
-        return await cg.get_active()
 
 
 async def _get_monday_key() -> str:
