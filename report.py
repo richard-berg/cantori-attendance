@@ -207,7 +207,9 @@ def generate_attendance_report(
     <h2>Absence details:</h2>
     {_table(join[absent_tonight], columns=["Name", "Excused", "Voice Part"])}
 
-    <p>{_action_item("Please confirm whether they told us in advance, and follow up with anyone who is AWOL.")}</p>
+    <p>{_action_item("<b>Kim/Attendance</b>: please confirm that folks listed above were truly absent, and/or whether they told us in advance. "
+                     "<b>Janara</b>: once Kim has confirmed, please make any necessary corrections to today's attendance in ChoirGenius, "
+                     "and follow up with those who were AWOL.")}</p>
 
     <br><hr>
 
@@ -224,12 +226,17 @@ def generate_attendance_report(
     <h2>Plus, <b>{maybe_this_cycle.sum()}</b> others are still listed as "maybe":</h2>
     {format_singers_indented(join[maybe_this_cycle])}
     <p>"Maybes" are not counted as part of the roster.
-    {_action_item('Please confirm their intentions, and move them to "Yes" or "No" ASAP.')}
+    {_action_item('<b>Janara</b>: please confirm their intentions, and move them to "Yes" or "No" ASAP.')}
     </p>
 
     <h2>Absence Totals:</h2>
     {format_absence_totals(join[relevant_absences])}
     <p>Singers with 3 or more absences are subject to make-up sessions, or being asked to sit out.</p>
+    <p>
+    {_action_item('<b>Section Leaders</b>: please determine the musical needs of the affected singers, '
+                  'and make the necessary arrangements with Mark (to assess preparedness) or Janara '
+                  '(to remove them from the current cycle).')}
+    </p>
 
     <br><hr>
 
@@ -254,7 +261,7 @@ def generate_attendance_report(
 
     <h1>Consistency Checks</h1>
 
-    <p>{_action_item("Please double-check that these make sense")}
+    <p>{_action_item("<b>Janara/Attendance</b>: please double-check that these make sense")}
     (i.e. aren't the result of inconsistent data entry in ChoirGenius vs Monday.com)</p>
 
     <ul>
@@ -283,7 +290,7 @@ def generate_attendance_report(
 
 def _action_item(msg: str) -> str:
     style = """
-        font-weight: bold;
+        font-size: 1.15rem;
         font-style: italic;
         background-color: #FDFD96;
     """

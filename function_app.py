@@ -26,7 +26,11 @@ CHOIRGENIUS_SECRET_PASSWORD = "choirgenius-password"
 
 CANTORI_CHOIRGENIUS_COM = yarl.URL("https://cantori.choirgenius.com/")
 
-ATTENDANCE_EMAILS = ["attendance@cantorinewyork.com", "richard.berg@cantorinewyork.com"]
+ATTENDANCE_EMAILS = [
+    "attendance@cantorinewyork.com",
+    "richard.berg@cantorinewyork.com",
+    "sectionleaders@gaggle.email",
+]
 ERROR_EMAILS = ["richard.berg@cantorinewyork.com"]
 
 app = func.FunctionApp()
