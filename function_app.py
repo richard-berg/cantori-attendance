@@ -31,6 +31,10 @@ ATTENDANCE_EMAILS = [
     "richard.berg@cantorinewyork.com",
     "sectionleaders@gaggle.email",
 ]
+CONSISTENCY_EMAILS = [
+    "attendance@cantorinewyork.com",
+    "richard.berg@cantorinewyork.com",
+]
 ERROR_EMAILS = ["richard.berg@cantorinewyork.com"]
 
 app = func.FunctionApp()
@@ -169,7 +173,7 @@ async def send_consistency_report(force: bool = False):
         subject += f" (as of {current_nyc_time.strftime('%Y-%m-%d %H:%M:%S %Z')})"
 
         if worth_sending or force:
-            await send_email(subject, body, ATTENDANCE_EMAILS)
+            await send_email(subject, body, CONSISTENCY_EMAILS)
     except CantoriError as e:
         await send_email("Error generating report", str(e), ERROR_EMAILS)
 
