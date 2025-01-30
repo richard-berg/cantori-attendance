@@ -29,7 +29,7 @@ CANTORI_CHOIRGENIUS_COM = yarl.URL("https://cantori.choirgenius.com/")
 ATTENDANCE_EMAILS = [
     "attendance@cantorinewyork.com",
     "richard.berg@cantorinewyork.com",
-    "sectionleaders@gaggle.email",
+    "sectionleaders@cantorinewyork.com",
 ]
 CONSISTENCY_EMAILS = [
     "attendance@cantorinewyork.com",
