@@ -215,20 +215,22 @@ async def get_audition_candidates() -> pandas.DataFrame:
 
 async def _get_monday_key() -> str:
     async with DefaultAzureCredential() as credential:
-        secret_client = SecretClient(vault_url=AZURE_VAULT_URL, credential=credential)
-        monday_api_key = await secret_client.get_secret(MONDAY_SECRET_NAME)
-        if not monday_api_key.value:
-            raise RuntimeError("Monday API key not found in Vault")
+        async with SecretClient(vault_url=AZURE_VAULT_URL, credential=credential) as secret_client:
+            assert isinstance(secret_client, SecretClient)  # base class not annotated with Self
+            monday_api_key = await secret_client.get_secret(MONDAY_SECRET_NAME)
+            if not monday_api_key.value:
+                raise RuntimeError("Monday API key not found in Vault")
 
-        return monday_api_key.value
+            return monday_api_key.value
 
 
 async def _get_choirgenius() -> ChoirGenius:
     async with DefaultAzureCredential() as credential:
-        secret_client = SecretClient(vault_url=AZURE_VAULT_URL, credential=credential)
-        user = await secret_client.get_secret(CHOIRGENIUS_SECRET_USER)
-        password = await secret_client.get_secret(CHOIRGENIUS_SECRET_PASSWORD)
-        if not (user.value and password.value):
-            raise RuntimeError("ChoirGenius credentials not found in Vault")
+        async with SecretClient(vault_url=AZURE_VAULT_URL, credential=credential) as secret_client:
+            assert isinstance(secret_client, SecretClient)
+            user = await secret_client.get_secret(CHOIRGENIUS_SECRET_USER)
+            password = await secret_client.get_secret(CHOIRGENIUS_SECRET_PASSWORD)
+            if not (user.value and password.value):
+                raise RuntimeError("ChoirGenius credentials not found in Vault")
 
-        return ChoirGenius(CANTORI_CHOIRGENIUS_COM, user.value, password.value)
+            return ChoirGenius(CANTORI_CHOIRGENIUS_COM, user.value, password.value)
