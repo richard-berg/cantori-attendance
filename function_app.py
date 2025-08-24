@@ -179,7 +179,7 @@ async def send_consistency_report(force: bool = False):
 
 
 def _determine_season(today: date) -> str:
-    if today.month >= 6:
+    if today.month >= 7:
         return f"{today.year}-{str(today.year + 1)[-2:]}"
     else:
         return f"{today.year - 1}-{str(today.year)[-2:]}"
@@ -189,7 +189,7 @@ def _determine_concert_cycle(roster: pandas.DataFrame, today: date) -> Tuple[dat
     concert_dates = sorted(d for d in roster.columns if isinstance(d, date))
     if not concert_dates:
         raise CantoriError("Monday.com roster has no concert cycles defined")
-    cycle_from = date(concert_dates[0].year, 9, 1)
+    cycle_from = date(concert_dates[0].year, 7, 1)
     for cycle_to in concert_dates:
         if cycle_from <= today <= cycle_to:
             return cycle_from, cycle_to
