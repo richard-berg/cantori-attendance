@@ -129,6 +129,7 @@ appsettings.json
 local.settings.json
 
 # Azurite artifacts
+AzuriteConfig
 __blobstorage__
 __queuestorage__
 __azurite_db*__.json
