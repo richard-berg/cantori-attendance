@@ -7,8 +7,8 @@ import httpx
 import pandas
 
 API_URL = "https://api.monday.com/v2"
-API_VERSION = "2023-10"
-ROSTER_BOARD_ID = "6792979476"
+API_VERSION = "2025-07"
+ROSTER_BOARD_ID = "9192120251"
 AUDITION_BOARD_ID = "3767283316"
 
 
