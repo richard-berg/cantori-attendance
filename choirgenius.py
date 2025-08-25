@@ -92,10 +92,10 @@ class ChoirGenius:
         report_url = str(self.base_url / "report" / report)
         html_report = await self.client.get(report_url)
 
-        soup = BeautifulSoup(html_report, features="html.parser")
+        soup = BeautifulSoup(html_report.text, features="html.parser")
         css_id = f'g4event-{report.replace("_", "-")}-filter'
         hidden_inputs = soup.select(f'#{css_id} input[type="hidden"]')
-        hidden_fields = {i.attrs["name"]: i.attrs["value"] for i in hidden_inputs}
+        hidden_fields = {str(i.attrs["name"]): str(i.attrs["value"]) for i in hidden_inputs}
 
         # CG seems to have switched to half-open date ranges
         date_to_exclusive = date_to + timedelta(days=1)
