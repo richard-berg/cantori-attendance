@@ -12,12 +12,13 @@ from azure.keyvault.secrets.aio import SecretClient
 
 from choirgenius import ChoirGenius, EventType
 from graph_email import send_email
+from member_nags import generate_member_nags
 from monday import get_monday_auditions, get_monday_roster
-from report import (
-    generate_attendance_report,
-    generate_consistency_report,
-    generate_projected_attendance_report,
-)
+from attendance_report import generate_attendance_report
+from consistency_report import generate_consistency_report
+from projected_report import generate_projected_attendance_report
+from report_utils import Email
+
 
 AZURE_VAULT_URL = "https://cantorivault.vault.azure.net/"
 MONDAY_SECRET_NAME = "monday-api-key"
@@ -26,16 +27,8 @@ CHOIRGENIUS_SECRET_PASSWORD = "choirgenius-password"
 
 CANTORI_CHOIRGENIUS_COM = yarl.URL("https://cantori.choirgenius.com/")
 
-ATTENDANCE_EMAILS = [
-    "attendance@cantorinewyork.com",
-    "richard.berg@cantorinewyork.com",
-    "sectionleaders@cantorinewyork.com",
-]
-CONSISTENCY_EMAILS = [
-    "attendance@cantorinewyork.com",
-    "richard.berg@cantorinewyork.com",
-]
-ERROR_EMAILS = ["richard.berg@cantorinewyork.com"]
+
+ERROR_EMAILS = ("richard.berg@cantorinewyork.com",)
 
 app = func.FunctionApp()
 
@@ -91,13 +84,13 @@ async def send_attendance_report(force: bool = False):
                 cg.get_projected_attendance(cycle_from, cycle_to, EventType.REHEARSAL),
             )
 
-        subject, body, worth_sending = generate_attendance_report(
+        email, worth_sending = generate_attendance_report(
             actual_attendance, projected_attendance, roster, current_nyc_date, cycle_from, cycle_to
         )
         if worth_sending or force:
-            await send_email(subject, body, ATTENDANCE_EMAILS)
+            await send_email(email)
     except CantoriError as e:
-        await send_email("Error generating report", str(e), ERROR_EMAILS)
+        await send_email(Email("Error generating report", str(e), ERROR_EMAILS))
 
 
 # 2PM Eastern daily, from September to May
@@ -128,13 +121,13 @@ async def send_projected_attendance_report(force: bool = False):
                 cycle_from, cycle_to, EventType.REHEARSAL
             )
 
-        subject, body, worth_sending = generate_projected_attendance_report(
+        email, worth_sending = generate_projected_attendance_report(
             projected_attendance, roster, current_nyc_date, cycle_to
         )
         if worth_sending or force:
-            await send_email(subject, body, ATTENDANCE_EMAILS)
+            await send_email(email)
     except CantoriError as e:
-        await send_email("Error generating report", str(e), ERROR_EMAILS)
+        await send_email(Email("Error generating report", str(e), ERROR_EMAILS))
 
 
 # 10PM every night
@@ -167,15 +160,45 @@ async def send_consistency_report(force: bool = False):
                 cycle_from, cycle_to, EventType.CONCERT
             )
 
-        subject, body, worth_sending = generate_consistency_report(
-            roster, candidates, cg_active, projected_concert_attendance, season, cycle_to
+        email, worth_sending = generate_consistency_report(
+            roster, candidates, cg_active, projected_concert_attendance, season, cycle_to, current_nyc_time
         )
-        subject += f" (as of {current_nyc_time.strftime('%Y-%m-%d %H:%M:%S %Z')})"
 
         if worth_sending or force:
-            await send_email(subject, body, CONSISTENCY_EMAILS)
+            await send_email(email)
     except CantoriError as e:
-        await send_email("Error generating report", str(e), ERROR_EMAILS)
+        await send_email(Email("Error generating report", str(e), ERROR_EMAILS))
+
+
+# 7:30AM Tuesdays, September to May
+@app.schedule(schedule="0 30 7 * 9-12,1-5 Tue", arg_name="myTimer")
+async def trigger_member_nags(myTimer: func.TimerRequest) -> None:
+    await send_member_nags()
+
+
+@app.route(route="member_nags", methods=[func.HttpMethod.POST])
+async def post_member_nags(req: func.HttpRequest):
+    await send_member_nags(force=True)
+
+
+async def send_member_nags(force: bool = False):
+    try:
+        roster = await get_roster()
+
+        current_nyc_time = datetime.now(ZoneInfo("America/New_York"))
+        current_nyc_date = current_nyc_time.date()
+        cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
+
+        async with await _get_choirgenius() as cg:
+            projected_attendance = await cg.get_projected_attendance(
+                cycle_from, cycle_to, EventType.REHEARSAL
+            )
+
+        emails = generate_member_nags(projected_attendance, roster, cycle_to)
+        for email in emails:
+            await send_email(email)
+    except CantoriError as e:
+        await send_email(Email("Error generating report", str(e), ERROR_EMAILS))
 
 
 def _determine_season(today: date) -> str:
