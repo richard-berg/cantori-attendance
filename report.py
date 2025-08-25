@@ -205,6 +205,7 @@ def generate_attendance_report(
     projected_attendance: pandas.DataFrame,
     roster: pandas.DataFrame,
     current_nyc_date: date,
+    cycle_from: date,
     cycle_to: date,
 ) -> Tuple[str, str, bool]:
     """Returns: subject (txt), body (HTML)"""
@@ -212,12 +213,15 @@ def generate_attendance_report(
     concerts = [c for c in roster.columns if isinstance(c, date)]
 
     past_rehearsals = [c for c in actual_attendance.columns if isinstance(c, date)]
-    first_rehearsal = min(past_rehearsals)
-    most_recent_rehearsal = max(past_rehearsals)
-    worth_sending = most_recent_rehearsal == current_nyc_date
+    first_rehearsal = min(past_rehearsals) if past_rehearsals else cycle_from
+    most_recent_rehearsal = max(past_rehearsals) if past_rehearsals else None
+    today_is_thursday = current_nyc_date.weekday == 3
+    worth_sending = today_is_thursday or most_recent_rehearsal == current_nyc_date
 
     future_rehearsals = [
-        c for c in projected_attendance.columns if isinstance(c, date) and c > most_recent_rehearsal
+        c
+        for c in projected_attendance.columns
+        if isinstance(c, date) and (most_recent_rehearsal is None or c > most_recent_rehearsal)
     ]
 
     actual_attendance["Attended"] = actual_attendance[past_rehearsals].sum(axis=1)
@@ -252,12 +256,14 @@ def generate_attendance_report(
 
     relevant_absences = singing_this_cycle & (join.Absences_total >= 3)
 
-    present_tonight = (join[f"{most_recent_rehearsal}_actual"] == 1).fillna(False)
-    absent_tonight = singing_this_cycle & ~present_tonight
+    if most_recent_rehearsal is not None:
+        present_tonight = (join[f"{most_recent_rehearsal}_actual"] == 1).fillna(False)
+        absent_tonight = singing_this_cycle & ~present_tonight
+        marked_absent = join[f"{most_recent_rehearsal}_projected"] == 0
+    else:
+        present_tonight = absent_tonight = marked_absent = pandas.Series(False, index=join.index)
 
-    marked_absent = join[f"{most_recent_rehearsal}_projected"] == 0
     join["Excused"] = marked_absent.fillna(False).map(lambda x: "Marked in CG" if x else "Unexcused?")
-
     if future_rehearsals:
         next_rehearsal = min(future_rehearsals)
         next_week = _projected_absence_details(join[singing_this_cycle], next_rehearsal)
