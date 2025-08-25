@@ -92,7 +92,7 @@ async def send_attendance_report(force: bool = False):
             )
 
         subject, body, worth_sending = generate_attendance_report(
-            actual_attendance, projected_attendance, roster, current_nyc_date, cycle_to
+            actual_attendance, projected_attendance, roster, current_nyc_date, cycle_from, cycle_to
         )
         if worth_sending or force:
             await send_email(subject, body, ATTENDANCE_EMAILS)
