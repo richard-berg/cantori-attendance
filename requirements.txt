@@ -8,6 +8,7 @@ azure-identity
 azure-keyvault-secrets
 beautifulsoup4
 httpx
+inflection
 msgraph-sdk
 mypy
 pandas
