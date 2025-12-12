@@ -171,8 +171,12 @@ async def send_consistency_report(force: bool = False):
 
 
 # 7:30AM Tuesdays, September to May
-@app.schedule(schedule="0 30 7 * 9-12,1-5 Tue", arg_name="myTimer")
+@app.schedule(schedule="0 30 13 * 9-12,1-5 Tue", arg_name="myTimer")
 async def trigger_member_nags(myTimer: func.TimerRequest) -> None:
+    if myTimer.past_due:
+        logging.warning("The timer was past due!")
+        return
+
     await send_member_nags()
 
 
