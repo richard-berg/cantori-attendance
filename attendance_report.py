@@ -85,6 +85,7 @@ def generate_attendance_report(
         next_rehearsal = min(future_rehearsals)
         next_week = _projected_absence_details(join[singing_this_cycle], next_rehearsal)
     else:
+        next_rehearsal = "N/A"
         next_week = "<p>No more rehearsals this cycle!</p>"
 
     subtotals = {
