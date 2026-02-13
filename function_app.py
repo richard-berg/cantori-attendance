@@ -195,7 +195,7 @@ async def send_member_nags(force: bool = False):
 
         async with await _get_choirgenius() as cg:
             projected_attendance = await cg.get_projected_attendance(
-                cycle_from, cycle_to, EventType.REHEARSAL
+                current_nyc_date, cycle_to, EventType.REHEARSAL
             )
 
         emails = generate_member_nags(projected_attendance, roster, cycle_to)
