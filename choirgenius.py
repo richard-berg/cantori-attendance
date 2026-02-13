@@ -102,6 +102,7 @@ class ChoirGenius:
 
         data = {
             "sets[]": "g4account::role::member",
+            "show_all_events": "1",
             "event_type[]": event_type.value,
             "range_start[date]": date_from.strftime(DATE_FORMAT),
             "range_end[date]": date_to_exclusive.strftime(DATE_FORMAT),
