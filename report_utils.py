@@ -52,6 +52,9 @@ def _projected_absence_details(
     <h2>Singers who are marked absent:</h2>
     {format_singers_indented(df[df[rehearsal_col] == 0])}
 
+    <h2>Singers who are marked partial:</h2>
+    {format_singers_indented(df[df[rehearsal_col] == 0.5])}
+
     <h2>Singers who haven't marked their plans in ChoirGenius:</h2>
     {format_singers_indented(df[df[rehearsal_col].isna()])}
     """
@@ -93,7 +96,7 @@ def format_singers_indented(singers: pandas.DataFrame) -> str:
 
 
 def format_absence_totals(singers: pandas.DataFrame) -> str:
-    df = singers.groupby(["Absences_total", "Absences_actual", "Absences_projected"]).agg({"Name": set})
+    df = singers.groupby(["Absences_total", "Absences_actual", "Absences_projected", "Partials"]).agg({"Name": set})
     df = df.sort_index(ascending=False).reset_index()
 
     def format_name_aggregation(row: pandas.Series) -> str:
@@ -107,6 +110,7 @@ def format_absence_totals(singers: pandas.DataFrame) -> str:
         "Absences_total": "Total",
         "Absences_actual": "Actual",
         "Absences_projected": "Projected",
+        "Partials": "Partial",
         "Names_Formatted": "Singers (click to email)",
     }
     df = df.rename(columns=col_names)

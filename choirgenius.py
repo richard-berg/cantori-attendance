@@ -112,7 +112,7 @@ class ChoirGenius:
         # first few rows from Drupal are crap -- formatted to look pretty in Excel, not
         # for machine readability
         valid_csv = "Name" + csv.split("\r", 2)[2]
-        dtype = defaultdict(lambda: "Int32", Name="str")
+        dtype = defaultdict(lambda: "Float64", Name="str")
         df = pandas.read_csv(StringIO(valid_csv), sep=",", lineterminator="\r", dtype=dtype)
         df.columns = df.columns.map(
             lambda col: datetime.strptime(col, DATE_FORMAT).date() if col[0].isdigit() else col
