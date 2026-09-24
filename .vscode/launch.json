@@ -8,6 +8,42 @@
       "port": 9091,
       "preLaunchTask": "func: host start",
       "justMyCode": false
+    },
+    {
+      "name": "Preview attendance report",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/preview_report.py",
+      "args": ["attendance_report"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Preview projected attendance report",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/preview_report.py",
+      "args": ["projected_attendance_report"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Preview consistency report",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/preview_report.py",
+      "args": ["consistency_report"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Preview member nag",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/preview_report.py",
+      "args": ["member_nags"],
+      "console": "integratedTerminal",
+      "justMyCode": false
     }
   ]
 }
