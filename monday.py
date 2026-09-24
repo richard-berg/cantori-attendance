@@ -8,7 +8,7 @@ import pandas
 
 API_URL = "https://api.monday.com/v2"
 API_VERSION = "2025-07"
-ROSTER_BOARD_ID = "9192120251"
+ROSTER_BOARD_ID = "18414062540"
 AUDITION_BOARD_ID = "3767283316"
 
 
