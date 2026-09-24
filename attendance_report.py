@@ -100,8 +100,8 @@ def generate_attendance_report(
     <h2>Absence details:</h2>
     {_table(join[absent_tonight], columns=["Name", "Excused", "Voice Part"])}
 
-    <p>{_action_item("<b>Maggie/Attendance</b>: please confirm that folks listed above were truly absent, and/or whether they told us in advance. "
-                     "<b>Janara</b>: once Maggie has confirmed, please make any necessary corrections to today's attendance in ChoirGenius, "
+    <p>{_action_item("<b>Stephen/Attendance</b>: please confirm that folks listed above were truly absent, and/or whether they told us in advance. "
+                     "<b>Janara</b>: once Stephen has confirmed, please make any necessary corrections to today's attendance in ChoirGenius, "
                      "and follow up with those who were AWOL.")}</p>
 
     <br><hr>
