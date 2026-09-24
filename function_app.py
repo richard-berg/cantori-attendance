@@ -1,7 +1,7 @@
 import logging
 from asyncio import gather
 from datetime import date, datetime, timedelta
-from typing import Tuple
+from typing import Iterable, Tuple
 from zoneinfo import ZoneInfo
 
 import azure.functions as func
@@ -66,31 +66,35 @@ async def post_attendance_report(req: func.HttpRequest):
 
 async def send_attendance_report(force: bool = False):
     try:
-        roster = await get_roster()
-
-        current_nyc_time = datetime.now(ZoneInfo("America/New_York"))
-        current_nyc_date = current_nyc_time.date()
-        cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
-
-        # exclude today's rehearsal stats, until 7PM New York time
-        if current_nyc_time.hour <= 19:
-            rehearsals_to = current_nyc_date - timedelta(days=1)
-        else:
-            rehearsals_to = current_nyc_date
-
-        async with await _get_choirgenius() as cg:
-            actual_attendance, projected_attendance = await gather(
-                cg.get_rehearsal_attendance(cycle_from, rehearsals_to),
-                cg.get_projected_attendance(cycle_from, cycle_to, EventType.REHEARSAL),
-            )
-
-        email, worth_sending = generate_attendance_report(
-            actual_attendance, projected_attendance, roster, current_nyc_date, cycle_from, cycle_to
-        )
+        email, worth_sending = await build_attendance_report()
         if worth_sending or force:
             await send_email(email)
     except CantoriError as e:
         await send_email(Email("Error generating report", str(e), ERROR_EMAILS))
+
+
+async def build_attendance_report() -> Tuple[Email, bool]:
+    roster = await get_roster()
+
+    current_nyc_time = datetime.now(ZoneInfo("America/New_York"))
+    current_nyc_date = current_nyc_time.date()
+    cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
+
+    # exclude today's rehearsal stats, until 7PM New York time
+    if current_nyc_time.hour <= 19:
+        rehearsals_to = current_nyc_date - timedelta(days=1)
+    else:
+        rehearsals_to = current_nyc_date
+
+    async with await _get_choirgenius() as cg:
+        actual_attendance, projected_attendance = await gather(
+            cg.get_rehearsal_attendance(cycle_from, rehearsals_to),
+            cg.get_projected_attendance(cycle_from, cycle_to, EventType.REHEARSAL),
+        )
+
+    return generate_attendance_report(
+        actual_attendance, projected_attendance, roster, current_nyc_date, cycle_from, cycle_to
+    )
 
 
 # 2PM Eastern daily, from September to May
@@ -110,24 +114,28 @@ async def post_projected_attendance_report(req: func.HttpRequest):
 
 async def send_projected_attendance_report(force: bool = False):
     try:
-        roster = await get_roster()
-
-        current_nyc_time = datetime.now(ZoneInfo("America/New_York"))
-        current_nyc_date = current_nyc_time.date()
-        cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
-
-        async with await _get_choirgenius() as cg:
-            projected_attendance = await cg.get_projected_attendance(
-                cycle_from, cycle_to, EventType.REHEARSAL
-            )
-
-        email, worth_sending = generate_projected_attendance_report(
-            projected_attendance, roster, current_nyc_date, cycle_to
-        )
+        email, worth_sending = await build_projected_attendance_report()
         if worth_sending or force:
             await send_email(email)
     except CantoriError as e:
         await send_email(Email("Error generating report", str(e), ERROR_EMAILS))
+
+
+async def build_projected_attendance_report() -> Tuple[Email, bool]:
+    roster = await get_roster()
+
+    current_nyc_time = datetime.now(ZoneInfo("America/New_York"))
+    current_nyc_date = current_nyc_time.date()
+    cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
+
+    async with await _get_choirgenius() as cg:
+        projected_attendance = await cg.get_projected_attendance(
+            cycle_from, cycle_to, EventType.REHEARSAL
+        )
+
+    return generate_projected_attendance_report(
+        projected_attendance, roster, current_nyc_date, cycle_to
+    )
 
 
 # 10PM every night
@@ -147,27 +155,30 @@ async def post_consistency_report(req: func.HttpRequest):
 
 async def send_consistency_report(force: bool = False):
     try:
-        current_nyc_time = datetime.now(ZoneInfo("America/New_York"))
-        current_nyc_date = current_nyc_time.date()
-        season = _determine_season(date.today())
-
-        async with await _get_choirgenius() as cg:
-            roster, candidates, cg_active = await gather(
-                get_roster(), get_audition_candidates(), cg.get_active()
-            )
-            cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
-            projected_concert_attendance = await cg.get_projected_attendance(
-                cycle_from, cycle_to, EventType.CONCERT
-            )
-
-        email, worth_sending = generate_consistency_report(
-            roster, candidates, cg_active, projected_concert_attendance, season, cycle_to, current_nyc_time
-        )
-
+        email, worth_sending = await build_consistency_report()
         if worth_sending or force:
             await send_email(email)
     except CantoriError as e:
         await send_email(Email("Error generating report", str(e), ERROR_EMAILS))
+
+
+async def build_consistency_report() -> Tuple[Email, bool]:
+    current_nyc_time = datetime.now(ZoneInfo("America/New_York"))
+    current_nyc_date = current_nyc_time.date()
+    season = _determine_season(date.today())
+
+    async with await _get_choirgenius() as cg:
+        roster, candidates, cg_active = await gather(
+            get_roster(), get_audition_candidates(), cg.get_active()
+        )
+        cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
+        projected_concert_attendance = await cg.get_projected_attendance(
+            cycle_from, cycle_to, EventType.CONCERT
+        )
+
+    return generate_consistency_report(
+        roster, candidates, cg_active, projected_concert_attendance, season, cycle_to, current_nyc_time
+    )
 
 
 # 7:30AM Tuesdays, September to May
@@ -187,22 +198,26 @@ async def post_member_nags(req: func.HttpRequest):
 
 async def send_member_nags(force: bool = False):
     try:
-        roster = await get_roster()
-
-        current_nyc_time = datetime.now(ZoneInfo("America/New_York"))
-        current_nyc_date = current_nyc_time.date()
-        cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
-
-        async with await _get_choirgenius() as cg:
-            projected_attendance = await cg.get_projected_attendance(
-                current_nyc_date, cycle_to, EventType.REHEARSAL
-            )
-
-        emails = generate_member_nags(projected_attendance, roster, cycle_to)
+        emails = await build_member_nags()
         for email in emails:
             await send_email(email)
     except CantoriError as e:
         await send_email(Email("Error generating report", str(e), ERROR_EMAILS))
+
+
+async def build_member_nags() -> Iterable[Email]:
+    roster = await get_roster()
+
+    current_nyc_time = datetime.now(ZoneInfo("America/New_York"))
+    current_nyc_date = current_nyc_time.date()
+    cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
+
+    async with await _get_choirgenius() as cg:
+        projected_attendance = await cg.get_projected_attendance(
+            current_nyc_date, cycle_to, EventType.REHEARSAL
+        )
+
+    return generate_member_nags(projected_attendance, roster, cycle_to)
 
 
 def _determine_season(today: date) -> str:
