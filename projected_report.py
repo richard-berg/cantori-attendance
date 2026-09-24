@@ -28,7 +28,7 @@ def generate_projected_attendance_report(
 
     singing_this_cycle = join[cycle_to].isin(SINGING_STATES)
 
-    confirmed = join[next_rehearsal] == 1
+    confirmed = join[next_rehearsal] > 0
     marked_absent = join[next_rehearsal] == 0
     not_marked = join[next_rehearsal].isna()
 

@@ -39,7 +39,7 @@ def generate_consistency_report(
         projected_concert_attendance[concerts] == 0
     ).sum(axis=1)
     projected_concert_attendance["Concerts_Marked_Singing"] = (
-        projected_concert_attendance[concerts] == 1
+        projected_concert_attendance[concerts] > 0
     ).sum(axis=1)
     join = join.merge(
         projected_concert_attendance[["Name", "Concerts_Marked_Absent", "Concerts_Marked_Singing"]],

@@ -41,8 +41,9 @@ def generate_attendance_report(
         if isinstance(c, date) and (most_recent_rehearsal is None or c > most_recent_rehearsal)
     ]
 
-    actual_attendance["Attended"] = actual_attendance[past_rehearsals].sum(axis=1)
+    actual_attendance["Attended"] = (actual_attendance[past_rehearsals] > 0).sum(axis=1)
     actual_attendance["Absences"] = len(past_rehearsals) - actual_attendance.Attended
+    actual_attendance["Partials"] = (actual_attendance[past_rehearsals] == 0.5).sum(axis=1)
 
     # Only count explicitly marked absences, not dates that haven't been marked
     projected_attendance["Absences"] = (projected_attendance[future_rehearsals] == 0).sum(axis=1)
@@ -74,11 +75,12 @@ def generate_attendance_report(
     relevant_absences = singing_this_cycle & (join.Absences_total >= 3)
 
     if most_recent_rehearsal is not None:
-        present_tonight = (join[f"{most_recent_rehearsal}_actual"] == 1).fillna(False)
+        present_tonight = (join[f"{most_recent_rehearsal}_actual"] > 0).fillna(False)
+        partial_tonight = (join[f"{most_recent_rehearsal}_actual"] == 0.5).fillna(False)
         absent_tonight = singing_this_cycle & ~present_tonight
         marked_absent = join[f"{most_recent_rehearsal}_projected"] == 0
     else:
-        present_tonight = absent_tonight = marked_absent = pandas.Series(False, index=join.index)
+        present_tonight = partial_tonight = absent_tonight = marked_absent = pandas.Series(False, index=join.index)
 
     join["Excused"] = marked_absent.fillna(False).map(lambda x: "Marked in CG" if x else "Unexcused?")
     if future_rehearsals:
@@ -90,8 +92,20 @@ def generate_attendance_report(
 
     subtotals = {
         "Present": present_tonight,
+        "Partial": partial_tonight,
         "Absent": absent_tonight,
     }
+
+    maybe_section = ""
+    if maybe_this_cycle.any():
+        maybe_section = f"""
+    <h2>Plus, <b>{maybe_this_cycle.sum()}</b> others are still listed as "maybe":</h2>
+    {format_singers_indented(join[maybe_this_cycle])}
+    <p>"Maybes" do not count toward the Roster stats above, nor to the Absence Totals below.</p>
+    <p>
+    {_action_item('<b>Janara</b>: please confirm their intentions, and move them to "Yes" or "No" ASAP.')}
+    </p>
+    """
 
     body = f"""
     <h1>This Week ({most_recent_rehearsal})</h1>
@@ -103,6 +117,9 @@ def generate_attendance_report(
     <p>{_action_item("<b>Stephen/Attendance</b>: please confirm that folks listed above were truly absent, and/or whether they told us in advance. "
                      "<b>Janara</b>: once Stephen has confirmed, please make any necessary corrections to today's attendance in ChoirGenius, "
                      "and follow up with those who were AWOL.")}</p>
+
+    <h2>Partial Details:</h2>
+    {_table(join[singing_this_cycle & partial_tonight], columns=["Name", "Voice Part"])}
 
     <br><hr>
 
@@ -116,12 +133,7 @@ def generate_attendance_report(
     <h2><b>{singing_this_cycle.sum()}</b> singers have said they'll participate:</h2>
     {format_subtotals_table(join[singing_this_cycle], {f"{cycle_to.strftime(r'%B')} Roster": singing_this_cycle})}
 
-    <h2>Plus, <b>{maybe_this_cycle.sum()}</b> others are still listed as "maybe":</h2>
-    {format_singers_indented(join[maybe_this_cycle])}
-    <p>"Maybes" do not count toward the Roster stats above, nor to the Absence Totals below.</p>
-    <p>
-    {_action_item('<b>Janara</b>: please confirm their intentions, and move them to "Yes" or "No" ASAP.')}
-    </p>
+    {maybe_section}
 
     <h2>Absence Totals:</h2>
     {format_absence_totals(join[relevant_absences])}
