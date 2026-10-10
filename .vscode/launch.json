@@ -44,6 +44,24 @@
       "args": ["member_nags"],
       "console": "integratedTerminal",
       "justMyCode": false
+    },
+    {
+      "name": "Preview looking ahead report",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/preview_report.py",
+      "args": ["looking_ahead_report"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Preview welcome email",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/preview_report.py",
+      "args": ["welcome_emails"],
+      "console": "integratedTerminal",
+      "justMyCode": false
     }
   ]
 }

@@ -29,8 +29,6 @@ def generate_attendance_report(
 ) -> Tuple[Email, bool]:
     """Returns: Email, worth_sending"""
 
-    concerts = [c for c in roster.columns if isinstance(c, date)]
-
     past_rehearsals = [c for c in actual_attendance.columns if isinstance(c, date)]
     first_rehearsal = min(past_rehearsals) if past_rehearsals else cycle_from
     most_recent_rehearsal = max(past_rehearsals) if past_rehearsals else None
@@ -62,19 +60,10 @@ def generate_attendance_report(
 
     join["Absences_total"] = join.Absences_actual + join.Absences_projected
 
-    on_monday_roster = join.projected != "right_only"
-
     singing_this_cycle = join[cycle_to].isin(SINGING_STATES)
     maybe_this_cycle = join[cycle_to].isin(MAYBE_STATES)
 
     attended_at_least_one = join.Attended > 0
-
-    other_cycles = join[concerts].drop(columns=cycle_to)
-    other_cycles_yes = other_cycles.isin(SINGING_STATES).any(axis=1) & ~singing_this_cycle
-    other_cycles_maybe = other_cycles.isin(MAYBE_STATES).any(axis=1) & ~(
-        singing_this_cycle | other_cycles_yes
-    )
-    gone = on_monday_roster & ~(singing_this_cycle | other_cycles_yes | other_cycles_maybe)
 
     active_emails = join["Chorus Emails"] == "Yes"
 
@@ -152,25 +141,6 @@ def generate_attendance_report(
                   'and make the necessary arrangements with Mark (to assess preparedness) or Janara '
                   '(to remove them from the current cycle).')}
     </p>
-
-    <br><hr>
-
-    <h1>Looking Ahead</h1>
-
-    <h2><b>{(other_cycles_yes | other_cycles_maybe).sum()}</b> singers are sitting out this cycle:</h2>
-    <ul>
-        <li>
-            <p><b>{other_cycles_yes.sum()}</b> said they'd be back later this season:</p>
-            {format_singers_indented(join[other_cycles_yes])}
-        </li>
-        <li>
-            <p><b>{other_cycles_maybe.sum()}</b> said "maybe":</p>
-            {format_singers_indented(join[other_cycles_maybe])}
-        </li>
-    </ul>
-
-    <h2>The rest ({gone.sum()}) are not expected back this season:</h2>
-    {format_singers_indented(join[gone])}
 
     <br><hr>
 
