@@ -85,18 +85,8 @@ class PartialAttendanceTests(TestCase):
             "Partial Singer Soprano",
         )
         self.assertNotIn("Full Singer", partial_details.find_next("table").get_text())
-        self.assertEqual(
-            partial_details.find_next("h1").get_text(" ", strip=True), f"Next Rehearsal ({future_partial})"
-        )
-        marked_absent = soup.find("h2", string="Singers who are marked absent:")
-        projected_partial = marked_absent.find_next("h2")
-        self.assertEqual(projected_partial.get_text(strip=True), "Singers who are marked partial:")
-        self.assertIn("Partial Singer", projected_partial.find_next("p").get_text())
-        self.assertNotIn("Full Singer", projected_partial.find_next("p").get_text())
-        self.assertEqual(
-            projected_partial.find_next("h2").get_text(strip=True),
-            "Singers who haven't marked their plans in ChoirGenius:",
-        )
+        self.assertTrue(partial_details.find_next("h1").get_text(" ", strip=True).startswith("This Cycle"))
+        self.assertNotIn("Next Rehearsal", email.body)
         self.assertNotIn('still listed as "maybe"', email.body)
         self.assertNotIn("please confirm their intentions", email.body)
         self.assertNotIn("Looking Ahead", email.body)

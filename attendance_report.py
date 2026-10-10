@@ -9,7 +9,6 @@ from report_utils import (
     Email,
     _action_item,
     _fill_and_sort,
-    _projected_absence_details,
     _table,
     _wrap_body,
     format_absence_totals,
@@ -80,13 +79,6 @@ def generate_attendance_report(
         )
 
     join["Excused"] = marked_absent.fillna(False).map(lambda x: "Marked in CG" if x else "Unexcused?")
-    next_rehearsal: date | str
-    if future_rehearsals:
-        next_rehearsal = min(future_rehearsals)
-        next_week = _projected_absence_details(join[singing_this_cycle], next_rehearsal)
-    else:
-        next_rehearsal = "N/A"
-        next_week = "<p>No more rehearsals this cycle!</p>"
 
     subtotals = {
         "Present": present_tonight,
@@ -118,11 +110,6 @@ def generate_attendance_report(
 
     <h2>Partial Details:</h2>
     {_table(join[singing_this_cycle & partial_tonight], columns=["Name", "Voice Part"])}
-
-    <br><hr>
-
-    <h1>Next Rehearsal ({next_rehearsal})</h1>
-    {next_week}
 
     <br><hr>
 
