@@ -8,7 +8,7 @@ from function_app import (
     build_member_nags,
     build_projected_attendance_report,
 )
-
+from report_utils import Email
 
 OUTPUT_DIR = Path(__file__).parent / "previews"
 REPORTS = (
@@ -20,6 +20,7 @@ REPORTS = (
 
 
 async def preview_report(report: str) -> Path | None:
+    email: Email | None
     if report == "attendance_report":
         email, _ = await build_attendance_report()
     elif report == "projected_attendance_report":

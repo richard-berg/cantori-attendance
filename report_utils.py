@@ -60,6 +60,14 @@ def _projected_absence_details(
     """
 
 
+def weighted_absences(attendance: pandas.DataFrame, weights: dict[date, int]) -> pandas.Series:
+    # floor: a partial is free at a normal rehearsal, but costs one absence at a retreat
+    w = pandas.Series(
+        [weights.get(c, 1) for c in attendance.columns], index=attendance.columns, dtype="Float64"
+    )
+    return ((1 - attendance) * w // 1).sum(axis=1).astype(int)
+
+
 def format_mismatch_table(singers: pandas.DataFrame, monday_col: str, choirgenius_col: str) -> str:
     mismatch = (singers.cg == "both") & (singers[monday_col] != singers[choirgenius_col])
 
@@ -96,7 +104,9 @@ def format_singers_indented(singers: pandas.DataFrame) -> str:
 
 
 def format_absence_totals(singers: pandas.DataFrame) -> str:
-    df = singers.groupby(["Absences_total", "Absences_actual", "Absences_projected", "Partials"]).agg({"Name": set})
+    df = singers.groupby(["Absences_total", "Absences_actual", "Absences_projected", "Partials"]).agg(
+        {"Name": set}
+    )
     df = df.sort_index(ascending=False).reset_index()
 
     def format_name_aggregation(row: pandas.Series) -> str:
@@ -113,6 +123,8 @@ def format_absence_totals(singers: pandas.DataFrame) -> str:
         "Partials": "Partial",
         "Names_Formatted": "Singers (click to email)",
     }
+    count_columns = ["Absences_total", "Absences_actual", "Absences_projected", "Partials"]
+    df[count_columns] = df[count_columns].round().astype(int)
     df = df.rename(columns=col_names)
     return _table(df, columns=list(col_names.values()), headers=True)
 
