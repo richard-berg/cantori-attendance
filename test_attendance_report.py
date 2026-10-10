@@ -62,29 +62,43 @@ class PartialAttendanceTests(TestCase):
         weekly_rows = [
             row.get_text(" ", strip=True) for row in this_week.find_next("table").select("tbody tr")
         ]
-        absence_totals = soup.find("h2", string="Absence Totals:").find_next("table")
+        absence_totals = soup.find("h2", string="At risk (3+ projected absences):").find_next("table")
 
         self.assertEqual(actual.loc[0, "Attended"], 1)
         self.assertEqual(actual.loc[0, "Absences"], 2)
         self.assertEqual(actual.loc[0, "Partials"], 1)
-        self.assertIn("Soprano 1 1 0", weekly_rows)
+        self.assertEqual(
+            [th.get_text(strip=True) for th in this_week.find_next("table").select("thead th")],
+            ["", "Present", "Absent", "Late"],
+        )
+        self.assertIn("Soprano 1 0 1", weekly_rows)
         self.assertIn("Alto 1 0 0", weekly_rows)
-        self.assertIn("Partial", absence_totals.get_text(" ", strip=True))
+        self.assertIn("Late", absence_totals.get_text(" ", strip=True))
+        self.assertEqual(
+            [th.get_text(" ", strip=True) for th in absence_totals.select("thead th")],
+            ["", "Projected Total", "So Far", "Late"],
+        )
         self.assertEqual(
             absence_totals.select_one("tbody tr").get_text(" ", strip=True),
-            "3 2 1 1 Partial Singer",
+            "Partial Singer 3 2 1",
         )
+        this_cycle_heading = next(h for h in soup.find_all("h2") if "said they'll participate" in h.get_text())
+        self.assertEqual(
+            [th.get_text(" ", strip=True) for th in this_cycle_heading.find_next("table").select("thead th")],
+            ["", "October Roster", "At Risk"],
+        )
+        this_cycle_rows = [
+            row.get_text(" ", strip=True) for row in this_cycle_heading.find_next("table").select("tbody tr")
+        ]
+        self.assertEqual(this_cycle_rows, ["Soprano 1 1", "Alto 1 0"])
         self.assertNotIn("Full Singer", absence_totals.get_text(" ", strip=True))
         self.assertNotIn(
             "Partial Singer", soup.find("h2", string="Absence details:").find_next("table").get_text()
         )
-        partial_details = soup.find("h2", string="Partial Details:")
+        partial_details = soup.find("h2", string="Singers who were late:")
         self.assertIsNotNone(partial_details)
-        self.assertEqual(
-            partial_details.find_next("table").select_one("tbody tr").get_text(" ", strip=True),
-            "Partial Singer Soprano",
-        )
-        self.assertNotIn("Full Singer", partial_details.find_next("table").get_text())
+        self.assertEqual(partial_details.find_next("p").get_text(" ", strip=True), "Partial Singer")
+        self.assertNotIn("Full Singer", partial_details.find_next("p").get_text())
         self.assertTrue(partial_details.find_next("h1").get_text(" ", strip=True).startswith("This Cycle"))
         self.assertNotIn("Next Rehearsal", email.body)
         self.assertNotIn('still listed as "maybe"', email.body)
@@ -108,6 +122,123 @@ class PartialAttendanceTests(TestCase):
         self.assertIsNotNone(maybe_heading)
         self.assertIn("Full Singer", maybe_heading.find_next("p").get_text())
         self.assertIn("please confirm their intentions", maybe_email.body)
+
+    def test_at_risk_threshold_and_section_sort(self):
+        cycle_to = date(2026, 10, 31)
+        past = [date(2026, 9, 3), date(2026, 9, 10), date(2026, 9, 17), date(2026, 9, 24)]
+        future = [date(2026, 10, 1), date(2026, 10, 8)]
+        names = ["Zed Alto", "Amy Soprano", "Bob Soprano", "Future Risk", "Future Only"]
+        roster = pandas.DataFrame(
+            {
+                "Name": names,
+                cycle_to: ["Yes"] * 5,
+                "Voice Part": ["Alto", "Soprano", "Soprano", "Alto", "Alto"],
+                "sort_key": [2, 1, 1, 2, 2],
+                "color": ["blue", "red", "red", "blue", "blue"],
+                "Email": [f"{n}@example.com" for n in range(5)],
+                "Chorus Emails": ["Yes"] * 5,
+            }
+        )
+        actual = pandas.DataFrame(
+            {
+                "Name": names,
+                past[0]: [0, 0, 0, 0, 1],
+                past[1]: [0, 0, 0, 1, 1],
+                past[2]: [0, 1, 0, 1, 1],
+                past[3]: [0, 1, 1, 1, 1],
+            }
+        )
+        projected = actual.copy()
+        projected[future[0]] = [1, 1, 1, 0, 0]
+        projected[future[1]] = [1, 1, 1, 0, 0]
+
+        email, _ = generate_attendance_report(actual, projected, roster, past[-1], past[0], cycle_to)
+        soup = BeautifulSoup(email.body, "html.parser")
+        rows = [
+            row.get_text(" ", strip=True)
+            for row in soup.find("h2", string="At risk (3+ projected absences):")
+            .find_next("table")
+            .select("tbody tr")
+        ]
+        this_cycle_heading = next(h for h in soup.find_all("h2") if "said they'll participate" in h.get_text())
+        this_cycle_rows = [
+            row.get_text(" ", strip=True) for row in this_cycle_heading.find_next("table").select("tbody tr")
+        ]
+
+        # projected_total >= 3 only; "Amy Soprano" (2 so far) and "Future Only" (2 projected) are omitted
+        self.assertEqual(rows, ["Bob Soprano 3 3 0", "Future Risk 3 1 0", "Zed Alto 4 4 0"])
+        at_risk_rows = soup.find("h2", string="At risk (3+ projected absences):").find_next("table").select("tbody tr")
+        projected_cells = [row.find_all("td")[1] for row in at_risk_rows]
+        self.assertEqual(projected_cells[0].b.get_text(), "3")
+        self.assertNotIn("#FDFD96", str(projected_cells[0]))
+        self.assertIn("#FDFD96", str(projected_cells[2].b))
+        self.assertIsNone(at_risk_rows[0].find_all("td")[2].b)
+        self.assertEqual(this_cycle_rows, ["Soprano 2 1", "Alto 3 2"])
+        self.assertIsNone(next((h for h in soup.find_all("h2") if "Thresholds" in h.get_text()), None))
+
+        absence_details = soup.find("h2", string="Absence details:").find_next("table")
+        self.assertEqual(
+            [row.get_text(" ", strip=True) for row in absence_details.select("tbody tr")],
+            ["Zed Alto Marked 4th"],
+        )
+        self.assertIn("background-color: blue", str(absence_details.find("td")))
+        self.assertIn("#FDFD96", str(absence_details.find("b", string="4th")))
+        checklist = [li.get_text(" ", strip=True) for li in absence_details.find_next("ul").find_all("li")]
+        self.assertEqual(len(checklist), 3)
+        self.assertTrue(checklist[0].startswith("Stephen/Attendance : confirm"))
+        self.assertEqual(checklist[1], "Janara : then fix tonight's attendance in ChoirGenius.")
+        self.assertTrue(checklist[2].startswith("4th absence : Mark checks their preparedness"))
+
+    def test_absence_details_numbers_absences_and_explains_thresholds(self):
+        cycle_to = date(2026, 10, 31)
+        past = [date(2026, 9, 3), date(2026, 9, 12)]
+        names = ["Jumper", "Steady", "Second"]
+        roster = pandas.DataFrame(
+            {
+                "Name": names,
+                cycle_to: ["Yes"] * 3,
+                "Voice Part": ["Soprano"] * 3,
+                "sort_key": [1] * 3,
+                "color": ["red"] * 3,
+                "Email": [f"{n}@example.com" for n in range(3)],
+                "Chorus Emails": ["Yes"] * 3,
+            }
+        )
+        actual = pandas.DataFrame({"Name": names, past[0]: [0, 0, 1], past[1]: [0, 1, 0]})
+        actual.attrs[EVENT_WEIGHTS] = {past[1]: RETREAT_WEIGHT}
+        projected = actual.copy()
+        projected.loc[2, past[1]] = float("nan")
+
+        email, _ = generate_attendance_report(
+            actual.copy(), projected.copy(), roster, past[-1], past[0], cycle_to
+        )
+        soup = BeautifulSoup(email.body, "html.parser")
+        absence_details = soup.find("h2", string="Absence details:").find_next("table")
+        checklist = absence_details.find_next("ul").get_text(" ", strip=True)
+
+        # Jumper goes 1 -> 3 at the retreat; Second goes 0 -> 2 without telling us; Steady attended
+        self.assertEqual(
+            [row.get_text(" ", strip=True) for row in absence_details.select("tbody tr")],
+            ["Jumper Marked 3rd", "Second AWOL? 2nd"],
+        )
+        self.assertIsNotNone(absence_details.find("b", string="3rd"))
+        self.assertIsNone(absence_details.find("b", string="2nd"))
+        self.assertIn("Follow up with AWOL singers.", checklist)
+        self.assertIn("2nd absence : Section Leaders check in verbally", checklist)
+        self.assertIn("3rd absence : Section Leaders email", checklist)
+        self.assertNotIn("Mark", checklist)
+
+        quiet_email, _ = generate_attendance_report(
+            actual[["Name", past[0]]].copy(), projected[["Name", past[0]]].copy(), roster, past[0], past[0], cycle_to
+        )
+        quiet_soup = BeautifulSoup(quiet_email.body, "html.parser")
+        quiet_details = quiet_soup.find("h2", string="Absence details:").find_next("table")
+        self.assertEqual(
+            [row.get_text(" ", strip=True) for row in quiet_details.select("tbody tr")],
+            ["Jumper Marked", "Steady Marked"],
+        )
+        self.assertNotIn("check in verbally", quiet_email.body)
+        self.assertNotIn("Follow up with AWOL", quiet_email.body)
 
     def test_projected_partial_is_confirmed(self):
         rehearsal = date(2026, 9, 25)

@@ -11,11 +11,56 @@ from report_utils import (
     _fill_and_sort,
     _table,
     _wrap_body,
+    emphasize_absences,
     format_absence_totals,
     format_singers_indented,
     format_subtotals_table,
     weighted_absences,
 )
+
+
+def _owner(name: str) -> str:
+    return f'<b style="background-color: #FDFD96; padding: 0 0.2rem;">{name}</b>'
+
+
+# Singer's Handbook attendance thresholds -> follow-up action
+ABSENCE_THRESHOLDS = {
+    2: f"{_owner('Section Leaders')} check in verbally; seat them next to you.",
+    3: f"{_owner('Section Leaders')} email about their attendance &amp; how we can support them.",
+    4: f"{_owner('Mark')} checks their preparedness; they may be asked to withdraw.",
+    5: f"{_owner('Janara')} removes them from this cycle (no exceptions).",
+}
+ORDINALS = {2: "2nd", 3: "3rd", 4: "4th", 5: "5th+"}
+
+
+def _ordinal(n: int) -> str:
+    suffix = "th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _format_absence_number(absences: float) -> str:
+    """Which absence this was for the singer; 1st is left blank."""
+    if pandas.isna(absences) or absences < 2:
+        return ""
+    return emphasize_absences(int(absences), _ordinal(int(absences)))
+
+
+def _format_absence_checklist(absent: pandas.DataFrame) -> str:
+    if absent.empty:
+        return ""
+
+    awol = " Follow up with AWOL singers." if (absent.Excused == "AWOL?").any() else ""
+    lines = [
+        f"{_owner('Stephen/Attendance')}: confirm who was truly absent, and who told us in advance.",
+        f"{_owner('Janara')}: then fix tonight's attendance in ChoirGenius.{awol}",
+    ]
+    tiers = set(absent.Absences_actual.dropna().clip(upper=5).astype(int))
+    lines += [
+        f"<b>{ORDINALS[n]} absence</b>: {action}" for n, action in ABSENCE_THRESHOLDS.items() if n in tiers
+    ]
+
+    items = "\n".join(f'<li style="margin-bottom: 0.5rem">{line}</li>' for line in lines)
+    return f"<ul>{items}</ul>"
 
 
 def generate_attendance_report(
@@ -66,7 +111,7 @@ def generate_attendance_report(
 
     active_emails = join["Chorus Emails"] == "Yes"
 
-    relevant_absences = singing_this_cycle & (join.Absences_total >= 3)
+    at_risk = singing_this_cycle & (join.Absences_total >= 3)
 
     if most_recent_rehearsal is not None:
         present_tonight = (join[f"{most_recent_rehearsal}_actual"] > 0).fillna(False)
@@ -78,12 +123,13 @@ def generate_attendance_report(
             False, index=join.index
         )
 
-    join["Excused"] = marked_absent.fillna(False).map(lambda x: "Marked in CG" if x else "Unexcused?")
+    join["Excused"] = marked_absent.fillna(False).map(lambda x: "Marked" if x else "AWOL?")
+    join["Absence_number"] = join.Absences_actual.map(_format_absence_number)
 
     subtotals = {
         "Present": present_tonight,
-        "Partial": partial_tonight,
         "Absent": absent_tonight,
+        "Late": partial_tonight,
     }
 
     maybe_section = ""
@@ -91,7 +137,7 @@ def generate_attendance_report(
         maybe_section = f"""
     <h2>Plus, <b>{maybe_this_cycle.sum()}</b> others are still listed as "maybe":</h2>
     {format_singers_indented(join[maybe_this_cycle])}
-    <p>"Maybes" do not count toward the Roster stats above, nor to the Absence Totals below.</p>
+    <p>"Maybes" do not count toward the Roster stats above, nor to the At Risk stats below.</p>
     <p>
     {_action_item('<b>Janara</b>: please confirm their intentions, and move them to "Yes" or "No" ASAP.')}
     </p>
@@ -102,32 +148,26 @@ def generate_attendance_report(
     {format_subtotals_table(join[singing_this_cycle], subtotals)}
 
     <h2>Absence details:</h2>
-    {_table(join[absent_tonight], columns=["Name", "Excused", "Voice Part"])}
+    {_table(join[absent_tonight], columns=["Name", "Excused", "Absence_number"], color_names=True)}
+    {_format_absence_checklist(join[absent_tonight])}
 
-    <p>{_action_item("<b>Stephen/Attendance</b>: please confirm that folks listed above were truly absent, and/or whether they told us in advance. "
-                     "<b>Janara</b>: once Stephen has confirmed, please make any necessary corrections to today's attendance in ChoirGenius, "
-                     "and follow up with those who were AWOL.")}</p>
-
-    <h2>Partial Details:</h2>
-    {_table(join[singing_this_cycle & partial_tonight], columns=["Name", "Voice Part"])}
+    <h2>Singers who were late:</h2>
+    {format_singers_indented(join[singing_this_cycle & partial_tonight])}
 
     <br><hr>
 
     <h1>This Cycle ({first_rehearsal} to {cycle_to})</h1>
 
     <h2><b>{singing_this_cycle.sum()}</b> singers have said they'll participate:</h2>
-    {format_subtotals_table(join[singing_this_cycle], {f"{cycle_to.strftime(r'%B')} Roster": singing_this_cycle})}
+    {format_subtotals_table(
+        join[singing_this_cycle],
+        {f"{cycle_to.strftime(r'%B')}<br>Roster": singing_this_cycle, "At<br>Risk": at_risk},
+    )}
 
     {maybe_section}
 
-    <h2>Absence Totals:</h2>
-    {format_absence_totals(join[relevant_absences])}
-    <p>Singers with 3 or more absences are subject to make-up sessions, or being asked to sit out.</p>
-    <p>
-    {_action_item('<b>Section Leaders</b>: please determine the musical needs of the affected singers, '
-                  'and make the necessary arrangements with Mark (to assess preparedness) or Janara '
-                  '(to remove them from the current cycle).')}
-    </p>
+    <h2>At risk (3+ projected absences):</h2>
+    {format_absence_totals(join[at_risk])}
 
     <br><hr>
 
