@@ -1,6 +1,7 @@
 from datetime import date
 from typing import Tuple
 import pandas
+from choirgenius import EVENT_WEIGHTS
 from report_utils import (
     ATTENDANCE_EMAILS,
     MAYBE_STATES,
@@ -14,6 +15,7 @@ from report_utils import (
     format_absence_totals,
     format_singers_indented,
     format_subtotals_table,
+    weighted_absences,
 )
 
 
@@ -42,11 +44,15 @@ def generate_attendance_report(
     ]
 
     actual_attendance["Attended"] = (actual_attendance[past_rehearsals] > 0).sum(axis=1)
-    actual_attendance["Absences"] = len(past_rehearsals) - actual_attendance.Attended
+    actual_attendance["Absences"] = weighted_absences(
+        actual_attendance[past_rehearsals].fillna(0), actual_attendance.attrs.get(EVENT_WEIGHTS, {})
+    )
     actual_attendance["Partials"] = (actual_attendance[past_rehearsals] == 0.5).sum(axis=1)
 
     # Only count explicitly marked absences, not dates that haven't been marked
-    projected_attendance["Absences"] = (projected_attendance[future_rehearsals] == 0).sum(axis=1)
+    projected_attendance["Absences"] = weighted_absences(
+        projected_attendance[future_rehearsals], projected_attendance.attrs.get(EVENT_WEIGHTS, {})
+    )
 
     join = roster.merge(projected_attendance, on="Name", how="outer", indicator="projected")
     join = join.merge(
@@ -80,9 +86,12 @@ def generate_attendance_report(
         absent_tonight = singing_this_cycle & ~present_tonight
         marked_absent = join[f"{most_recent_rehearsal}_projected"] == 0
     else:
-        present_tonight = partial_tonight = absent_tonight = marked_absent = pandas.Series(False, index=join.index)
+        present_tonight = partial_tonight = absent_tonight = marked_absent = pandas.Series(
+            False, index=join.index
+        )
 
     join["Excused"] = marked_absent.fillna(False).map(lambda x: "Marked in CG" if x else "Unexcused?")
+    next_rehearsal: date | str
     if future_rehearsals:
         next_rehearsal = min(future_rehearsals)
         next_week = _projected_absence_details(join[singing_this_cycle], next_rehearsal)

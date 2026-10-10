@@ -1,4 +1,5 @@
 from collections import defaultdict
+from csv import reader as csv_reader
 from datetime import date, datetime, timedelta
 from enum import Enum
 from io import StringIO
@@ -19,6 +20,10 @@ class EventType(Enum):
 
 
 DATE_FORMAT = r"%m-%d-%Y"
+
+# DataFrame.attrs key: {event date -> number of rehearsals the event counts as}
+EVENT_WEIGHTS = "event_weights"
+RETREAT_WEIGHT = 2
 
 
 class ChoirGenius:
@@ -111,10 +116,16 @@ class ChoirGenius:
     def _parse_csv_export(self, csv: str):
         # first few rows from Drupal are crap -- formatted to look pretty in Excel, not
         # for machine readability
-        valid_csv = "Name" + csv.split("\r", 2)[2]
+        _, titles_row, dates_and_data = csv.split("\r", 2)
+        valid_csv = "Name" + dates_and_data
         dtype = defaultdict(lambda: "Float64", Name="str")
         df = pandas.read_csv(StringIO(valid_csv), sep=",", lineterminator="\r", dtype=dtype)
         df.columns = df.columns.map(
             lambda col: datetime.strptime(col, DATE_FORMAT).date() if col[0].isdigit() else col
         )
+        titles = next(csv_reader([titles_row]))[1:]
+        df.attrs[EVENT_WEIGHTS] = {
+            col: RETREAT_WEIGHT if "retreat" in title.lower() else 1
+            for col, title in zip(df.columns[1:], titles)
+        }
         return df
