@@ -80,7 +80,7 @@ class ChoirGenius:
             "attendance_grid_report", date_from, date_to, EventType.REHEARSAL
         )
         df = self._parse_csv_export(response.text)
-        return df
+        return _drop_events_after(df, date_to)
 
     async def get_projected_attendance(
         self, date_from: date, date_to: date, event_type: EventType
@@ -89,7 +89,7 @@ class ChoirGenius:
             "attendance_grid_forecast_report", date_from, date_to, event_type
         )
         df = self._parse_csv_export(response.text)
-        return df
+        return _drop_events_after(df, date_to)
 
     async def _fetch_csv_report(
         self, report: str, date_from: date, date_to: date, event_type: EventType
@@ -102,12 +102,16 @@ class ChoirGenius:
         hidden_inputs = soup.select(f'#{css_id} input[type="hidden"]')
         hidden_fields = {str(i.attrs["name"]): str(i.attrs["value"]) for i in hidden_inputs}
 
+        # CG has flip-flopped between closed and half-open date ranges, so always
+        # over-fetch by a day; callers drop anything after date_to.
+        range_end = date_to + timedelta(days=1)
+
         data = {
             "sets[]": "g4account::role::member",
             "show_all_events": "1",
             "event_type[]": event_type.value,
             "range_start[date]": date_from.strftime(DATE_FORMAT),
-            "range_end[date]": date_to.strftime(DATE_FORMAT),
+            "range_end[date]": range_end.strftime(DATE_FORMAT),
             "export": "Export",
         }
         data.update(hidden_fields)
@@ -129,3 +133,11 @@ class ChoirGenius:
             for col, title in zip(df.columns[1:], titles)
         }
         return df
+
+
+def _drop_events_after(df: pandas.DataFrame, date_to: date) -> pandas.DataFrame:
+    late = [c for c in df.columns if isinstance(c, date) and c > date_to]
+    weights = {d: w for d, w in df.attrs.get(EVENT_WEIGHTS, {}).items() if d <= date_to}
+    df = df.drop(columns=late)
+    df.attrs[EVENT_WEIGHTS] = weights
+    return df
