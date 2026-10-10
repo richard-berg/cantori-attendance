@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
-from typing import List, Set, Tuple
+from typing import Iterable, List, Tuple
 
 import numpy as np
 import pandas
@@ -103,30 +103,31 @@ def format_singers_indented(singers: pandas.DataFrame) -> str:
     return f'<p style="margin-left: 1.5rem">{line}</p>'
 
 
+def emphasize_absences(n: int, text: str | None = None) -> str:
+    """Progressively louder: plain through 2, bold at 3, bold & highlighted at 4+."""
+    text = str(n) if text is None else text
+    if n >= 4:
+        return f'<b style="background-color: #FDFD96; padding: 0.1rem 0.3rem;">{text}</b>'
+    if n == 3:
+        return f"<b>{text}</b>"
+    return text
+
+
 def format_absence_totals(singers: pandas.DataFrame) -> str:
-    df = singers.groupby(["Absences_total", "Absences_actual", "Absences_projected", "Partials"]).agg(
-        {"Name": set}
-    )
-    df = df.sort_index(ascending=False).reset_index()
-
-    def format_name_aggregation(row: pandas.Series) -> str:
-        aggregated_names: Set[str] = row["Name"]
-        join = pandas.DataFrame(aggregated_names, columns=["Name"]).merge(singers, on="Name")
-        join = join.sort_values(["sort_key", "Name"])
-        return format_singers_oneline(join)
-
-    df = df.assign(Names_Formatted=df.apply(format_name_aggregation, axis=1))
     col_names = {
-        "Absences_total": "Total",
-        "Absences_actual": "Actual",
-        "Absences_projected": "Projected",
-        "Partials": "Partial",
-        "Names_Formatted": "Singers (click to email)",
+        "Name": "Name",
+        "Absences_total": "Projected<br>Total",
+        "Absences_actual": "So<br>Far",
+        "Partials": "Late",
     }
-    count_columns = ["Absences_total", "Absences_actual", "Absences_projected", "Partials"]
+    df = singers.sort_values(["sort_key", "Name"])[[*col_names, "Email", "color"]].copy()
+    count_columns = ["Absences_total", "Absences_actual", "Partials"]
     df[count_columns] = df[count_columns].round().astype(int)
+    df["Absences_total"] = df.Absences_total.map(emphasize_absences)
     df = df.rename(columns=col_names)
-    return _table(df, columns=list(col_names.values()), headers=True)
+    return _table(
+        df, columns=list(col_names.values()), headers=True, color_names=True, centered=["Projected<br>Total"]
+    )
 
 
 def format_subtotals_table(df: pandas.DataFrame, indicators: dict[str, pandas.Series]) -> str:
@@ -171,7 +172,18 @@ def _fill_and_sort(df: pandas.DataFrame) -> pandas.DataFrame:
     return df
 
 
-def _table(df: pandas.DataFrame, columns: List[str], headers: bool = False, totals: bool = False) -> str:
+def _table(
+    df: pandas.DataFrame,
+    columns: List[str],
+    headers: bool = False,
+    totals: bool = False,
+    color_names: bool = False,
+    centered: Iterable[str] = (),
+) -> str:
+    """
+    color_names: highlight the Name cell with the singer's section color.
+    centered: columns to center even though their values are formatted HTML rather than ints.
+    """
     tbl_style = """
         border-collapse: collapse;
         border: 2px solid #eee;
@@ -187,18 +199,29 @@ def _table(df: pandas.DataFrame, columns: List[str], headers: bool = False, tota
         """
         cells = ""
         for j, col in enumerate(columns):
-            weight = "bold" if j == 0 else "normal"
+            highlight = (col == "Voice Part" or (col == "Name" and color_names)) and "color" in col_map
+            # bold looks poor as white-on-color, so section-highlighted cells stay normal weight
+            weight = "bold" if j == 0 and not highlight else "normal"
 
             if col == "Name" and "Email" in col_map:
+                link_color = "color: white;" if highlight else ""
                 cell_value = f"""
-                <a href="mailto:{row[col_map["Email"]]}" style="text-decoration:none;">
+                <a href="mailto:{row[col_map["Email"]]}" style="text-decoration:none; {link_color}">
                     {row[col_map["Name"]]}
                 </a>
                 """
             else:
                 cell_value = row[col_map[col]]
 
-            if col == "Voice Part" and "color" in col_map:
+            if col == "Name" and highlight:
+                cell_style = f"""
+                    padding: 0.5rem 1rem;
+                    color: white;
+                    background-color: {row[col_map["color"]]};
+                    text-align: left;
+                    font-weight: {weight};
+                """
+            elif col == "Voice Part" and highlight:
                 cell_style = f"""
                     padding: 0.5rem 2rem;
                     color: white;
@@ -207,7 +230,7 @@ def _table(df: pandas.DataFrame, columns: List[str], headers: bool = False, tota
                     font-weight: {weight};
                 """
             else:
-                align = "center" if isinstance(cell_value, (int, np.integer)) else "left"
+                align = "center" if isinstance(cell_value, (int, np.integer)) or col in centered else "left"
                 cell_style = f"""
                     padding: 0.5rem 1rem;
                     color: black;
