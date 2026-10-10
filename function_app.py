@@ -1,7 +1,7 @@
 import logging
 from asyncio import gather
 from datetime import date, datetime, timedelta
-from typing import Iterable, Tuple
+from typing import Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import azure.functions as func
@@ -16,6 +16,12 @@ from member_nags import generate_member_nags
 from monday import get_monday_auditions, get_monday_roster
 from attendance_report import generate_attendance_report
 from consistency_report import generate_consistency_report
+from looking_ahead_report import (
+    LookingAheadData,
+    generate_looking_ahead_report,
+    generate_welcome_emails,
+    next_concert_cycle,
+)
 from projected_report import generate_projected_attendance_report
 from report_utils import Email
 
@@ -218,6 +224,100 @@ async def build_member_nags() -> Iterable[Email]:
         )
 
     return generate_member_nags(projected_attendance, roster, cycle_to)
+
+
+# 9AM Eastern daily, September to May. Only sends on the midpoint of each
+# concert cycle, and two weeks before the concert.
+@app.schedule(schedule="0 0 13 * 9-12,1-5 *", arg_name="myTimer")
+async def trigger_looking_ahead(myTimer: func.TimerRequest) -> None:
+    if myTimer.past_due:
+        logging.warning("The timer was past due!")
+        return
+
+    await send_looking_ahead_report()
+    await send_welcome_emails()
+
+
+@app.route(route="looking_ahead_report", methods=[func.HttpMethod.POST])
+async def post_looking_ahead_report(req: func.HttpRequest):
+    await send_looking_ahead_report(force=True)
+
+
+@app.route(route="welcome_emails", methods=[func.HttpMethod.POST])
+async def post_welcome_emails(req: func.HttpRequest):
+    await send_welcome_emails(force=True)
+
+
+async def send_looking_ahead_report(force: bool = False):
+    try:
+        email, worth_sending = await build_looking_ahead_report()
+        if email is None:
+            logging.info("No next concert cycle this season; skipping Looking Ahead report")
+        elif worth_sending or force:
+            await send_email(email)
+    except CantoriError as e:
+        await send_email(Email("Error generating report", str(e), ERROR_EMAILS))
+
+
+async def send_welcome_emails(force: bool = False):
+    try:
+        emails, worth_sending = await build_welcome_emails()
+        if worth_sending or force:
+            for email in emails:
+                await send_email(email)
+    except CantoriError as e:
+        await send_email(Email("Error generating report", str(e), ERROR_EMAILS))
+
+
+async def build_looking_ahead_report() -> Tuple[Optional[Email], bool]:
+    data = await _build_looking_ahead_data()
+    if data is None:
+        return None, False
+    return generate_looking_ahead_report(data)
+
+
+async def build_welcome_emails() -> Tuple[List[Email], bool]:
+    data = await _build_looking_ahead_data()
+    if data is None:
+        return [], False
+    return generate_welcome_emails(data)
+
+
+async def _build_looking_ahead_data() -> Optional[LookingAheadData]:
+    current_nyc_date = datetime.now(ZoneInfo("America/New_York")).date()
+    season = _determine_season(current_nyc_date)
+
+    roster, candidates = await gather(get_roster(), get_audition_candidates())
+    cycle_from, cycle_to = _determine_concert_cycle(roster, current_nyc_date)
+    next_cycle_to = next_concert_cycle(roster, cycle_to)
+    if next_cycle_to is None:
+        return None
+
+    async with await _get_choirgenius() as cg:
+        cg_active, current_rehearsals, next_rehearsals = await gather(
+            cg.get_active(),
+            cg.get_projected_attendance(cycle_from, cycle_to, EventType.REHEARSAL),
+            cg.get_projected_attendance(
+                cycle_to + timedelta(days=1), next_cycle_to, EventType.REHEARSAL
+            ),
+        )
+
+    return LookingAheadData(
+        roster=roster,
+        candidates=candidates,
+        cg_active=cg_active,
+        season=season,
+        today=current_nyc_date,
+        cycle_first_rehearsal=_first_date(current_rehearsals) or cycle_from,
+        cycle_to=cycle_to,
+        next_cycle_to=next_cycle_to,
+        next_first_rehearsal=_first_date(next_rehearsals),
+    )
+
+
+def _first_date(df: pandas.DataFrame) -> Optional[date]:
+    dates = [c for c in df.columns if isinstance(c, date)]
+    return min(dates) if dates else None
 
 
 def _determine_season(today: date) -> str:

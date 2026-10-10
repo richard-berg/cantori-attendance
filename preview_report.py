@@ -5,8 +5,10 @@ from pathlib import Path
 from function_app import (
     build_attendance_report,
     build_consistency_report,
+    build_looking_ahead_report,
     build_member_nags,
     build_projected_attendance_report,
+    build_welcome_emails,
 )
 from report_utils import Email
 
@@ -16,6 +18,8 @@ REPORTS = (
     "projected_attendance_report",
     "consistency_report",
     "member_nags",
+    "looking_ahead_report",
+    "welcome_emails",
 )
 
 
@@ -29,11 +33,16 @@ async def preview_report(report: str) -> Path | None:
         email, _ = await build_consistency_report()
     elif report == "member_nags":
         email = next(iter(await build_member_nags()), None)
+    elif report == "looking_ahead_report":
+        email, _ = await build_looking_ahead_report()
+    elif report == "welcome_emails":
+        emails, _ = await build_welcome_emails()
+        email = next(iter(emails), None)
     else:
         raise ValueError(f"Unknown report: {report}")
 
     if email is None:
-        print("No member needs a nag; any previous preview file is stale.")
+        print("Nothing to preview; any previous preview file is stale.")
         return None
 
     OUTPUT_DIR.mkdir(exist_ok=True)

@@ -99,6 +99,7 @@ class PartialAttendanceTests(TestCase):
         )
         self.assertNotIn('still listed as "maybe"', email.body)
         self.assertNotIn("please confirm their intentions", email.body)
+        self.assertNotIn("Looking Ahead", email.body)
 
         roster_with_maybe = roster.copy()
         roster_with_maybe.loc[1, cycle_to] = "Maybe"
